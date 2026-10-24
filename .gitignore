@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Build artifacts
+Cargo.lock.bak
+
+# Local oracle output (regenerate with scripts/build-oracle.sh)
+/target/oracle
+
+# Editor
+.idea/
+.vscode/
+*.swp

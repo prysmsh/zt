@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "track": "legacy",
+  "op": "hash.sha512",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "hash.sha512",
+      "description": "SHA-512 of a fixed input",
+      "inputs": [
+        {"name": "message", "value": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"}
+      ],
+      "outputs": [
+        {"name": "digest", "value": "77788f1a0cea001a2631dae5d05dbd062008d5b30f50b9e29beb2a7822289004573dfc9b6ffeb1c786a16349e70f9836876a743c31c0a7a2a70727a852eec372"}
+      ]
+    }
+  ]
+}

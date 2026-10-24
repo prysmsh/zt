@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "track": "next",
+  "op": "identity.sign",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "next",
+      "op": "identity.sign",
+      "description": "Ed25519 signature over a fixed message",
+      "inputs": [
+        {
+          "name": "public_key",
+          "value": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+        },
+        {
+          "name": "message",
+          "value": "7a742d6e657874207465737420766563746f72206d657373616765"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "signature",
+          "value": "4f029473341fc8b30e35be18c1c92bc9408e50f64d90f03a249b2837d83a15a7a0e57e71398215103201ef3288b7ab259432888a0f088a0ae33001f38804cf0f"
+        }
+      ]
+    }
+  ]
+}

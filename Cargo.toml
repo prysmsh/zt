@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zt-crypto",
+    "crates/zt-testvectors",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MPL-2.0"
+
+[workspace.dependencies]
+zt-crypto = { path = "crates/zt-crypto" }
+
+# Cryptographic primitives. All from RustCrypto; no hand-rolled primitives.
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+hkdf = "0.12"
+sha2 = "0.10"
+blake3 = "1.5"
+rand = "0.8"
+rand_core = "0.6"
+subtle = "2.5"
+zeroize = { version = "1.7", features = ["derive"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+base64 = "0.22"
+
+# Testing
+proptest = "1.4"
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

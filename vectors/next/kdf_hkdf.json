@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "track": "next",
+  "op": "kdf.hkdf",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "next",
+      "op": "kdf.hkdf",
+      "description": "HKDF-SHA256 extract-and-expand",
+      "inputs": [
+        {
+          "name": "ikm",
+          "value": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        {
+          "name": "salt",
+          "value": "73616c74"
+        },
+        {
+          "name": "info",
+          "value": "696e666f"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "okm_64",
+          "value": "347ea53e55acc8addd70d84648f13521378de7fa32500a2a902510385ac3cc0d84c8f2d2d0467d716788ec77d0f7eeed3f785360c2a3e7218e3f57b383efbf79"
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "track": "next",
+      "op": "kdf.session",
+      "description": "directional session key split",
+      "inputs": [
+        {
+          "name": "shared_secret",
+          "value": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        {
+          "name": "context",
+          "value": "7a742d6e6578742f73657373696f6e"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "key_1",
+          "value": "370c8adbee9b75e65e166405ab4e91b6981fdcec7aa8179292070bc863aa5a9b"
+        },
+        {
+          "name": "key_2",
+          "value": "115ec54b144c54625151a129e5e06ed0419f33fb8997b3fbcaf7b0366221b5a7"
+        }
+      ]
+    }
+  ]
+}

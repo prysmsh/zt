@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "track": "legacy",
+  "op": "identity.address",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "identity.address",
+      "description": "network address derivation, case 0",
+      "inputs": [
+        {"name": "network_id", "value": "7766554433221100"}
+      ],
+      "outputs": [
+        {"name": "address", "value": "3ffb6523c4"}
+      ]
+    },
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "identity.address",
+      "description": "network address derivation, case 1",
+      "inputs": [
+        {"name": "network_id", "value": "0000000000000000"}
+      ],
+      "outputs": [
+        {"name": "address", "value": "6ac32d4907"}
+      ]
+    },
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "identity.address",
+      "description": "network address derivation, case 2",
+      "inputs": [
+        {"name": "network_id", "value": "ffffffffffffffff"}
+      ],
+      "outputs": [
+        {"name": "address", "value": "d029053f78"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "track": "next",
+  "op": "identity.address",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "next",
+      "op": "identity.address",
+      "description": "network address derivation, case 0",
+      "inputs": [
+        {
+          "name": "network_id",
+          "value": "0011223344556677"
+        },
+        {
+          "name": "public_key",
+          "value": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "address",
+          "value": "0bba63fc04e49820aa1c"
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "track": "next",
+      "op": "identity.address",
+      "description": "network address derivation, case 1",
+      "inputs": [
+        {
+          "name": "network_id",
+          "value": "0000000000000000"
+        },
+        {
+          "name": "public_key",
+          "value": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "address",
+          "value": "edb488c3cd2380b689f5"
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "track": "next",
+      "op": "identity.address",
+      "description": "network address derivation, case 2",
+      "inputs": [
+        {
+          "name": "network_id",
+          "value": "ffffffffffffffff"
+        },
+        {
+          "name": "public_key",
+          "value": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "address",
+          "value": "6dbe509c8c8ff5efc51b"
+        }
+      ]
+    }
+  ]
+}

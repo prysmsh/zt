@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "track": "next",
+  "op": "aead.chacha20poly1305",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "next",
+      "op": "aead.chacha20poly1305",
+      "description": "authenticated encryption",
+      "inputs": [
+        {
+          "name": "key",
+          "value": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        },
+        {
+          "name": "nonce",
+          "value": "5566778899aabbcc11223344"
+        },
+        {
+          "name": "aad",
+          "value": "7a742d6e65787420686561646572"
+        },
+        {
+          "name": "plaintext",
+          "value": "74686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f67"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "ciphertext",
+          "value": "ca307930a04cddad7729d599cbb789de59876dabdd4897449a9472fbb69708505428df54ae6643a497ced0"
+        },
+        {
+          "name": "tag",
+          "value": "32ce6a7e14964a3176ebfb3c0b15ddb8"
+        }
+      ]
+    }
+  ]
+}

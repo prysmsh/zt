@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "track": "legacy",
+  "op": "ecc.agree",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "ecc.agree",
+      "description": "X25519 shared secret",
+      "inputs": [
+        {"name": "public_a", "value": "60d7c7f7a6778c98784ef05afac13b5cd283e48d647cecce4d93c3f181a7d047c57d5762ada19214059b1310f3c1a07a024a39ae13812bfc24b73c36de3ddbe7"},
+        {"name": "public_b", "value": "5f255b61d090832f967e5e013471fe059d677053640f7100ac522d3b2e656d7f22524f98c6eba012c3f526e9c53c1ca78998500c14149ae14031f3376094ac83"}
+      ],
+      "outputs": [
+        {"name": "shared_secret", "value": "dcca683f2e7a47b869efe4075c4a87811e899fb50c912743cdfe839cfa0a7c06"}
+      ]
+    },
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "ecc.public",
+      "description": "public key derivation",
+      "inputs": [
+        {"name": "secret", "value": "5c1c6a32e22785170d385fb5efacb5ad11692ff0bedae223cc487f9144d1b52f437cbdde39fb518d638d3197f27d989caff99ba13c782434042b61b7e57cafc1"}
+      ],
+      "outputs": [
+        {"name": "public", "value": "60d7c7f7a6778c98784ef05afac13b5cd283e48d647cecce4d93c3f181a7d047c57d5762ada19214059b1310f3c1a07a024a39ae13812bfc24b73c36de3ddbe7"}
+      ]
+    }
+  ]
+}
