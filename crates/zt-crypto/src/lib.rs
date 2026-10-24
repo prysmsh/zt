@@ -46,17 +46,25 @@ pub mod address;
 pub mod credential;
 pub mod error;
 pub mod handshake;
+pub mod handshake_flow;
 pub mod identity;
 pub mod key_agreement;
+pub mod noise;
+pub mod packet;
 pub mod pq;
+pub mod session;
 pub mod symmetric;
 
 pub use credential::{ControllerIdentity, NodeCredential};
 pub use error::{Error, Result};
 pub use handshake::{KemEphemeral, KemHandshakeInitiator, KemHandshakeResponder};
+pub use handshake_flow::{HandshakeResult, Initiator, PeerStatic, Responder, StaticIdentity};
 pub use identity::{Address, Identity};
 pub use key_agreement::StaticKeyPair;
+pub use noise::{SymmetricState, TransportCipher};
+pub use packet::Packet;
 pub use pq::{KemSuite, NegotiatedSuites, SigSuite};
+pub use session::Session;
 pub use symmetric::{NonceValue, SymmetricKey};
 
 /// The domain separator used for all ZT-next protocol purposes.

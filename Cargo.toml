@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/zt-node",
     "crates/zt-crypto",
     "crates/zt-testvectors",
 ]

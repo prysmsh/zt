@@ -1,0 +1,18 @@
+[package]
+name = "zt-node"
+description = "ZT-next node: UDP transport, peer management, and the end-to-end data path"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zt-crypto.workspace = true
+rand.workspace = true
+rand_pq.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
