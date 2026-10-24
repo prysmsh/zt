@@ -5,7 +5,7 @@ alternative to ZeroTier with a commercial-friendly license structure.
 
 ## Status
 
-**M0 — cryptographic foundation: complete.**
+**M0 — cryptographic foundation: complete. PQ support: complete.**
 
 | Track | Scope | State |
 |---|---|---|
@@ -59,8 +59,31 @@ docs/
 | Key derivation | HKDF-SHA256 | RFC 5869 |
 | Signatures | Ed25519 | RFC 8032 |
 | Addressing | SHA-256 | FIPS 180-4 |
+| **Post-quantum KEM** | **ML-KEM-768** | **FIPS 203** |
+| **Post-quantum signatures** | **ML-DSA-65** | **FIPS 204** |
 
 No bespoke cryptography anywhere in `zt-crypto`.
+
+### Post-quantum resistance
+
+The default is **hybrid**: a classical primitive combined with a NIST-standard
+post-quantum primitive, secure as long as *either* holds. This follows the
+same construction used by Chrome and Cloudflare for TLS.
+
+| Purpose | Classical | Post-quantum | Combined |
+|---|---|---|---|
+| Key agreement | X25519 | ML-KEM-768 | 64 B shared secret |
+| Signatures | Ed25519 | ML-DSA-65 | 3373 B |
+
+Suites are negotiated before the handshake, preferring hybrid, then pure PQ,
+then classical. The negotiated suite is bound into the authenticated
+transcript so a downgrade is detected.
+
+**The PQ cost is per-session, not per-packet.** A hybrid handshake is
+~2.3 KB; the data path afterwards is unchanged, so throughput is unaffected.
+
+See [`docs/post-quantum-design.md`](docs/post-quantum-design.md) for the full
+rationale, size tables, and design trade-offs.
 
 ### Addressing
 
@@ -79,7 +102,7 @@ Deterministic, no rejection loop, and different per network.
 ├────────┴──────────┴────────────┴──────────┴──────────┴──────────┤
 │ public_key [u8;32]  │ controller_id [u8;16] │ nonce [u8;16]        │
 ├─────────────────────┴────────────────────────┴────────────────────┤
-│ signature [u8;64] (Ed25519 over all preceding bytes)             │
+│ signature (Ed25519 ‖ ML-DSA-65)                                 │
 └───────────────────────────────────────────────────────────────────┘
 ```
 

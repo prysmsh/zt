@@ -106,6 +106,12 @@ pub fn public_from_secret(secret: &[u8; PRIVATE_KEY_LEN]) -> [u8; PUBLIC_KEY_LEN
     PublicKey::from(&sk).to_bytes()
 }
 
+/// Fill a buffer with cryptographically secure random bytes.
+pub fn fill_random(buf: &mut [u8]) -> Result<()> {
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, buf);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

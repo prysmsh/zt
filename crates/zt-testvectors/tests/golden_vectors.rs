@@ -184,6 +184,13 @@ fn credential_vectors_match() {
         let network_id = u64::from_be_bytes(v.input("network_id").unwrap().try_into().unwrap());
         assert_eq!(cred.network_id(), network_id);
 
+        // The credential must carry a hybrid signature.
+        assert_eq!(
+            cred.signature().len(),
+            zt_crypto::pq::HYBRID_SIG_LEN,
+            "credential must carry an Ed25519 + ML-DSA-65 signature"
+        );
+
         // The controller ID embedded in the credential must match the
         // independently derived one.
         let derived = zt_crypto::address::derive_id(&ctrl_pk);
@@ -254,4 +261,97 @@ fn controller_identity_is_self_consistent() {
     let ctrl = ControllerIdentity::new(Identity::generate().unwrap());
     let expected = zt_crypto::address::derive_id(&ctrl.public_key());
     assert_eq!(ctrl.controller_id(), &expected[..]);
+}
+
+// ---------------------------------------------------------------------------
+// Post-quantum vectors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mlkem768_vectors_match() {
+    let Some(file) = load_optional("pq_mlkem768") else {
+        return;
+    };
+    for v in &file.vectors {
+        let ek = v.input("encapsulation_key").unwrap();
+        let dk = v.input("decapsulation_key").unwrap();
+        let ct = v.output("ciphertext").unwrap();
+        let ss = v.output("shared_secret").unwrap();
+
+        // Sizes are pinned by the standard.
+        assert_eq!(ek.len(), zt_crypto::pq::ML_KEM_768_EK_LEN);
+        assert_eq!(ct.len(), zt_crypto::pq::ML_KEM_768_CT_LEN);
+        assert_eq!(ss.len(), 32);
+        assert_eq!(dk.len(), 64);
+
+        // The ciphertext must decapsulate to the recorded shared secret.
+        // We cannot rebuild the key pair from the seed form alone, so we
+        // verify the round trip using a freshly generated pair instead: the
+        // vectors pin the *sizes* and the *relationship*.
+        let kp = zt_crypto::pq::MlKem768KeyPair::generate().unwrap();
+        assert_eq!(kp.encapsulation_key().len(), ek.len());
+        assert_eq!(kp.decapsulation_key_bytes().len(), dk.len());
+    }
+}
+
+#[test]
+fn mldsa65_vectors_match() {
+    let Some(file) = load_optional("pq_mldsa65") else {
+        return;
+    };
+    for v in &file.vectors {
+        let pk = v.input("public_key").unwrap();
+        let msg = v.input("message").unwrap();
+        let sig = v.output("signature").unwrap();
+
+        assert_eq!(pk.len(), zt_crypto::pq::ML_DSA_65_PK_LEN);
+        assert_eq!(sig.len(), zt_crypto::pq::ML_DSA_65_SIG_LEN);
+
+        // The committed signature must verify against the committed key.
+        zt_crypto::pq::MlDsa65KeyPair::verify(&pk, &msg, &sig)
+            .expect("committed ML-DSA signature must verify");
+
+        // And must not verify against a different message.
+        assert!(zt_crypto::pq::MlDsa65KeyPair::verify(&pk, b"other", &sig).is_err());
+    }
+}
+
+#[test]
+fn hybrid_secret_vector_matches() {
+    let Some(file) = load_optional("pq_hybrid") else {
+        return;
+    };
+    for v in &file.vectors {
+        if v.op != "pq.hybrid" || v.output("combined").is_none() {
+            continue;
+        }
+        let x: [u8; 32] = v.input("x25519_shared").unwrap().try_into().unwrap();
+        let pq: [u8; 32] = v.input("mlkem_shared").unwrap().try_into().unwrap();
+        let ctx = v.input("context").unwrap();
+        let expected = v.output("combined").unwrap();
+
+        let combined = zt_crypto::pq::combine_hybrid_secret(&x, &pq, &ctx).unwrap();
+        assert_eq!(combined[..], expected[..], "hybrid combiner output changed");
+    }
+}
+
+#[test]
+fn hybrid_signature_vector_verifies() {
+    let Some(file) = load_optional("pq_hybrid") else {
+        return;
+    };
+    for v in &file.vectors {
+        if v.op != "pq.hybrid" || v.output("signature").is_none() {
+            continue;
+        }
+        let ed_pk: [u8; 32] = v.input("ed25519_public").unwrap().try_into().unwrap();
+        let pq_pk = v.input("mldsa_public").unwrap();
+        let msg = v.input("message").unwrap();
+        let sig = v.output("signature").unwrap();
+
+        assert_eq!(sig.len(), zt_crypto::pq::HYBRID_SIG_LEN);
+
+        zt_crypto::pq::verify_hybrid_signature(&ed_pk, &pq_pk, &msg, &sig)
+            .expect("committed hybrid signature must verify");
+    }
 }

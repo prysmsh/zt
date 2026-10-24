@@ -200,6 +200,11 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
+/// Fill a buffer with cryptographically secure random bytes.
+pub fn fill_secure_random(buf: &mut [u8]) {
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, buf);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

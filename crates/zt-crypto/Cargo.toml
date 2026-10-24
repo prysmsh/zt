@@ -18,6 +18,10 @@ rand.workspace = true
 rand_core.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
+ml-kem.workspace = true
+ml-dsa.workspace = true
+rand_core_pq.workspace = true
+rand_pq.workspace = true
 
 [dev-dependencies]
 

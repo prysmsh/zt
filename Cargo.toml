@@ -26,6 +26,15 @@ rand_core = "0.6"
 subtle = "2.5"
 zeroize = { version = "1.7", features = ["derive"] }
 
+# Post-quantum primitives (NIST FIPS 203 / FIPS 204).
+# Note: these use rand_core 0.10, which is incompatible with the rand 0.8
+# line used elsewhere. The two RNG worlds are kept strictly separate:
+# `rand` (0.8) for the classical side, `rand_pq` (0.10) for the PQ side.
+ml-kem = { version = "0.3", features = ["getrandom", "zeroize"] }
+ml-dsa = { version = "0.1", features = ["getrandom"] }
+rand_core_pq = { package = "rand_core", version = "0.10" }
+rand_pq = { package = "rand", version = "0.10", features = ["std", "std_rng"] }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

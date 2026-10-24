@@ -5,7 +5,7 @@
 //! ZeroTier issues nodes a [`CertificateOfMembership`] (COM), which is a
 //! **long-lived bearer capability**. It has no expiry, it is not bound to the
 //! node's key material, and possession of it is sufficient to impersonate the
-//! member. Revocation is push-based: a revoked node remains usable until the
+//! member. Revocation is push-based: a revoked node remains valid until the
 //! controller's revocation list propagates to every peer.
 //!
 //! ZT-next replaces this with **short-lived certificates**:
@@ -22,6 +22,16 @@
 //!
 //! [`CertificateOfMembership`]: https://github.com/zerotier/zerotierone
 //!
+//! # Post-quantum signatures
+//!
+//! The controller's signing key is **hybrid**: an Ed25519 key plus an
+//! ML-DSA-65 key. Credentials carry both signatures, and verification
+//! requires both to be valid. This is the right place to spend the size
+//! budget — credentials are issued rarely, are not on the data path, and a
+//! forged credential is a serious compromise.
+//!
+//! See [`crate::pq`] for the hybrid signature construction.
+//!
 //! # Wire format
 //!
 //! The credential is deliberately simple and fixed-layout so that it can be
@@ -34,12 +44,22 @@
 //! ├────────┴──────────┴────────────┴──────────┴──────────┴──────────┤
 //! │ public_key [u8;32]  │ controller_id [u8;16] │ nonce [u8;16]        │
 //! ├─────────────────────┴────────────────────────┴────────────────────┤
-//! │ signature [u8;64] (Ed25519 over all preceding bytes)             │
+//! │ ed25519_sig [u8;64]  │ ml_dsa_65_sig [u8;3309]                    │
+//! ├──────────────────────┴────────────────────────────────────────────┤
+//! │ ml_dsa_65_pub [u8;1952]                                            │
 //! └───────────────────────────────────────────────────────────────────┘
 //! ```
+//!
+//! The ML-DSA public key travels with the credential so that a node can
+//! verify it without a separate key-distribution step. This is acceptable
+//! because credentials are rare; the controller's Ed25519 key is the
+//! trust anchor that pins the ML-DSA key.
 
 use crate::error::{Error, Result};
-use crate::identity::{Address, Identity, PUBLIC_KEY_LEN, SIGNATURE_LEN};
+use crate::identity::{Address, Identity, PUBLIC_KEY_LEN};
+use crate::pq::{
+    MlDsa65KeyPair, ED25519_SIG_LEN, HYBRID_SIG_LEN, ML_DSA_65_PK_LEN, ML_DSA_65_SIG_LEN,
+};
 
 /// Current credential format version.
 pub const CREDENTIAL_VERSION: u8 = 1;
@@ -51,9 +71,21 @@ pub const CONTROLLER_ID_LEN: usize = 16;
 pub const NONCE_LEN: usize = 16;
 
 /// Total serialized length of a credential.
-pub const CREDENTIAL_LEN: usize = 1 + 8 + 10 + 8 + 8 + 4 + 32 + 16 + 16 + 64;
+pub const CREDENTIAL_LEN: usize =
+    1 + 8 + 10 + 8 + 8 + 4 + 32 + 16 + 16 + ED25519_SIG_LEN + ML_DSA_65_SIG_LEN + ML_DSA_65_PK_LEN;
 
 // Field offsets within the serialized credential.
+//
+// The layout is:
+//
+//   [ header .............................................. ]
+//   [ public_key (32) | controller_id (16) | nonce (16)    ]
+//   [ ml_dsa_65_pub (1952)                                ]
+//   [ ed25519_sig (64) | ml_dsa_65_sig (3309)             ]
+//
+// The ML-DSA public key sits *before* the signatures because it is part of
+// the signed body: it is covered by both signatures, so it cannot be
+// swapped for an attacker-controlled key.
 const OFF_VERSION: usize = 0;
 const OFF_NETWORK_ID: usize = 1;
 const OFF_NODE_ADDR: usize = 9;
@@ -63,11 +95,17 @@ const OFF_TTL: usize = 35;
 const OFF_PUBLIC_KEY: usize = 39;
 const OFF_CONTROLLER_ID: usize = 71;
 const OFF_NONCE: usize = 87;
-const OFF_SIGNATURE: usize = 103;
+const OFF_PQ_PK: usize = OFF_NONCE + NONCE_LEN;
+const OFF_ED_SIG: usize = OFF_PQ_PK + ML_DSA_65_PK_LEN;
+const OFF_PQ_SIG: usize = OFF_ED_SIG + ED25519_SIG_LEN;
+const OFF_SIGNATURE_END: usize = OFF_PQ_SIG + ML_DSA_65_SIG_LEN;
+
+// The declared length must match the computed layout.
+const _: () = assert!(CREDENTIAL_LEN == OFF_SIGNATURE_END);
 
 /// A short-lived node certificate issued by a controller.
 ///
-/// The signature covers every byte preceding it, so the credential is
+/// The signatures cover every byte preceding them, so the credential is
 /// tamper-evident in its entirety.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NodeCredential {
@@ -79,7 +117,9 @@ pub struct NodeCredential {
     ttl_secs: u32,
     controller_id: [u8; CONTROLLER_ID_LEN],
     nonce: [u8; NONCE_LEN],
-    signature: [u8; SIGNATURE_LEN],
+    ed_signature: [u8; ED25519_SIG_LEN],
+    pq_signature: Vec<u8>,
+    pq_public_key: Vec<u8>,
 }
 
 impl NodeCredential {
@@ -123,14 +163,22 @@ impl NodeCredential {
         &self.nonce
     }
 
-    /// The Ed25519 signature over the credential body.
-    pub fn signature(&self) -> &[u8; SIGNATURE_LEN] {
-        &self.signature
+    /// The ML-DSA-65 public key that accompanies this credential.
+    pub fn pq_public_key(&self) -> &[u8] {
+        &self.pq_public_key
+    }
+
+    /// The combined hybrid signature (Ed25519 followed by ML-DSA-65).
+    pub fn signature(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(HYBRID_SIG_LEN);
+        out.extend_from_slice(&self.ed_signature);
+        out.extend_from_slice(&self.pq_signature);
+        out
     }
 
     /// Serialize to the wire format.
-    pub fn serialize(&self) -> [u8; CREDENTIAL_LEN] {
-        let mut out = [0u8; CREDENTIAL_LEN];
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = vec![0u8; CREDENTIAL_LEN];
         out[OFF_VERSION] = CREDENTIAL_VERSION;
         out[OFF_NETWORK_ID..OFF_NETWORK_ID + 8].copy_from_slice(&self.network_id.to_be_bytes());
         out[OFF_NODE_ADDR..OFF_NODE_ADDR + 10].copy_from_slice(self.node_address.as_bytes());
@@ -140,13 +188,18 @@ impl NodeCredential {
         out[OFF_PUBLIC_KEY..OFF_PUBLIC_KEY + 32].copy_from_slice(&self.public_key);
         out[OFF_CONTROLLER_ID..OFF_CONTROLLER_ID + 16].copy_from_slice(&self.controller_id);
         out[OFF_NONCE..OFF_NONCE + 16].copy_from_slice(&self.nonce);
-        out[OFF_SIGNATURE..OFF_SIGNATURE + 64].copy_from_slice(&self.signature);
+        out[OFF_PQ_PK..OFF_PQ_PK + ML_DSA_65_PK_LEN].copy_from_slice(&self.pq_public_key);
+        out[OFF_ED_SIG..OFF_ED_SIG + ED25519_SIG_LEN].copy_from_slice(&self.ed_signature);
+        out[OFF_PQ_SIG..OFF_PQ_SIG + ML_DSA_65_SIG_LEN].copy_from_slice(&self.pq_signature);
         out
     }
 
-    /// Parse from the wire format and verify the signature.
+    /// Parse from the wire format and verify the hybrid signature.
     ///
     /// `controller_key` is the Ed25519 public key of the issuing controller.
+    /// This is the trust anchor: it pins the ML-DSA key carried in the
+    /// credential, so a forged ML-DSA signature cannot be substituted.
+    ///
     /// Verification failure returns [`Error::AuthenticationFailed`].
     pub fn deserialize(
         bytes: &[u8],
@@ -175,11 +228,20 @@ impl NodeCredential {
         controller_id.copy_from_slice(&bytes[OFF_CONTROLLER_ID..OFF_CONTROLLER_ID + 16]);
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&bytes[OFF_NONCE..OFF_NONCE + 16]);
-        let mut signature = [0u8; 64];
-        signature.copy_from_slice(&bytes[OFF_SIGNATURE..OFF_SIGNATURE + 64]);
+        let pq_public_key = bytes[OFF_PQ_PK..OFF_PQ_PK + ML_DSA_65_PK_LEN].to_vec();
+        let mut ed_signature = [0u8; ED25519_SIG_LEN];
+        ed_signature.copy_from_slice(&bytes[OFF_ED_SIG..OFF_ED_SIG + ED25519_SIG_LEN]);
+        let pq_signature = bytes[OFF_PQ_SIG..OFF_PQ_SIG + ML_DSA_65_SIG_LEN].to_vec();
 
-        // Verify over the body only (everything before the signature).
-        Identity::verify(controller_key, &bytes[..OFF_SIGNATURE], &signature)?;
+        // The signed body is everything preceding the signatures. It includes
+        // the ML-DSA public key, so that key cannot be substituted.
+        let body = &bytes[..OFF_ED_SIG];
+
+        // Verify the Ed25519 signature over the full body.
+        Identity::verify(controller_key, body, &ed_signature)?;
+
+        // Verify the ML-DSA signature over the same body.
+        MlDsa65KeyPair::verify(&pq_public_key, body, &pq_signature)?;
 
         Ok(NodeCredential {
             network_id: u64::from_be_bytes(network_id),
@@ -190,7 +252,9 @@ impl NodeCredential {
             ttl_secs: u32::from_be_bytes(ttl),
             controller_id,
             nonce,
-            signature,
+            ed_signature,
+            pq_signature,
+            pq_public_key,
         })
     }
 
@@ -210,12 +274,15 @@ impl NodeCredential {
 
 /// A controller's signing identity.
 ///
-/// Controllers sign node credentials with a long-term Ed25519 key. Nodes
-/// trust a controller by trusting its public key, which may in turn be signed
-/// by a higher-level root (enabling delegation).
+/// Controllers sign node credentials with a **hybrid** key: an Ed25519 key
+/// (the trust anchor, pinned by nodes) plus an ML-DSA-65 key (the
+/// post-quantum half). Nodes trust a controller by trusting its Ed25519
+/// public key, which in turn authenticates the ML-DSA key carried in each
+/// credential.
 #[derive(Clone)]
 pub struct ControllerIdentity {
     identity: Identity,
+    pq: MlDsa65KeyPair,
     controller_id: [u8; CONTROLLER_ID_LEN],
 }
 
@@ -225,8 +292,10 @@ impl ControllerIdentity {
     pub fn new(identity: Identity) -> Self {
         let pk = identity.public_key_bytes();
         let controller_id = crate::address::derive_id(&pk);
+        let pq = MlDsa65KeyPair::generate().expect("ML-DSA key generation");
         Self {
             identity,
+            pq,
             controller_id,
         }
     }
@@ -236,9 +305,14 @@ impl ControllerIdentity {
         &self.controller_id
     }
 
-    /// The controller's Ed25519 public key.
+    /// The controller's Ed25519 public key — the trust anchor.
     pub fn public_key(&self) -> [u8; PUBLIC_KEY_LEN] {
         self.identity.public_key_bytes()
+    }
+
+    /// The controller's ML-DSA-65 public key.
+    pub fn pq_public_key(&self) -> Vec<u8> {
+        self.pq.public_key()
     }
 
     /// Issue a credential for a node.
@@ -255,8 +329,11 @@ impl ControllerIdentity {
         nonce: &[u8; NONCE_LEN],
     ) -> NodeCredential {
         let not_after = now_unix + ttl_secs as u64;
+        let pq_public_key = self.pq.public_key();
 
-        let mut body = [0u8; OFF_SIGNATURE];
+        // Build the unsigned body first, then sign it. The ML-DSA public key
+        // is part of the body so it cannot be substituted.
+        let mut body = vec![0u8; OFF_ED_SIG];
         body[OFF_VERSION] = CREDENTIAL_VERSION;
         body[OFF_NETWORK_ID..OFF_NETWORK_ID + 8].copy_from_slice(&network_id.to_be_bytes());
         body[OFF_NODE_ADDR..OFF_NODE_ADDR + 10].copy_from_slice(node_address.as_bytes());
@@ -266,8 +343,10 @@ impl ControllerIdentity {
         body[OFF_PUBLIC_KEY..OFF_PUBLIC_KEY + 32].copy_from_slice(node_public_key);
         body[OFF_CONTROLLER_ID..OFF_CONTROLLER_ID + 16].copy_from_slice(&self.controller_id);
         body[OFF_NONCE..OFF_NONCE + 16].copy_from_slice(nonce);
+        body[OFF_PQ_PK..OFF_PQ_PK + ML_DSA_65_PK_LEN].copy_from_slice(&pq_public_key);
 
-        let signature = self.identity.sign(&body);
+        let ed_signature = self.identity.sign(&body);
+        let pq_signature = self.pq.sign(&body).expect("ML-DSA signing");
 
         NodeCredential {
             network_id,
@@ -278,7 +357,9 @@ impl ControllerIdentity {
             ttl_secs,
             controller_id: self.controller_id,
             nonce: *nonce,
-            signature,
+            ed_signature,
+            pq_signature,
+            pq_public_key,
         }
     }
 }
@@ -337,6 +418,15 @@ mod tests {
         assert_eq!(parsed.ttl_secs(), 86_400);
         assert_eq!(parsed.not_after(), 1_000_000 + 86_400);
         assert_eq!(parsed.nonce(), &nonce);
+        assert_eq!(parsed.pq_public_key(), &ctrl.pq_public_key()[..]);
+    }
+
+    #[test]
+    fn credential_carries_hybrid_signature() {
+        let (ctrl, node, nwid) = fixture();
+        let addr = node.address_for_network(nwid);
+        let cred = ctrl.issue(nwid, addr, &node.public_key_bytes(), 1, 3600, &[0u8; 16]);
+        assert_eq!(cred.signature().len(), HYBRID_SIG_LEN);
     }
 
     #[test]
@@ -360,6 +450,33 @@ mod tests {
 
         // Flip a bit in the network ID.
         bytes[OFF_NETWORK_ID] ^= 0xff;
+        assert!(NodeCredential::deserialize(&bytes, &ctrl.public_key()).is_err());
+    }
+
+    #[test]
+    fn tampering_with_the_pq_signature_is_detected() {
+        let (ctrl, node, nwid) = fixture();
+        let addr = node.address_for_network(nwid);
+        let cred = ctrl.issue(nwid, addr, &node.public_key_bytes(), 1, 3600, &[0u8; 16]);
+        let mut bytes = cred.serialize();
+
+        // Corrupt only the ML-DSA half. The Ed25519 signature still verifies,
+        // but the hybrid check must reject the credential.
+        bytes[OFF_PQ_SIG] ^= 0xff;
+        assert!(NodeCredential::deserialize(&bytes, &ctrl.public_key()).is_err());
+    }
+
+    #[test]
+    fn swapping_the_pq_public_key_is_detected() {
+        let (ctrl, node, nwid) = fixture();
+        let other = ControllerIdentity::new(Identity::generate().unwrap());
+        let addr = node.address_for_network(nwid);
+        let cred = ctrl.issue(nwid, addr, &node.public_key_bytes(), 1, 3600, &[0u8; 16]);
+        let mut bytes = cred.serialize();
+
+        // Substitute a different ML-DSA public key.
+        let other_pk = other.pq_public_key();
+        bytes[OFF_PQ_PK..OFF_PQ_PK + ML_DSA_65_PK_LEN].copy_from_slice(&other_pk);
         assert!(NodeCredential::deserialize(&bytes, &ctrl.public_key()).is_err());
     }
 
