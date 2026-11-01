@@ -54,11 +54,18 @@ export const CALLBACK_PATH = '/auth/callback'
  */
 export function oidcConfig(env: Record<string, string | undefined> = import.meta.env): OidcConfig {
   const issuer = (env.VITE_ZT_OIDC_ISSUER ?? 'https://auth.prysm.sh/oidc').replace(/\/+$/, '')
+  // The scheme matters: the redirect URI has to be the one the browser
+  // actually used, or the provider refuses the exchange. When TLS is
+  // terminated upstream, the page is served over HTTPS even though the
+  // console's own Caddy speaks plain HTTP.
+  const scheme = env.VITE_ZT_PUBLIC_SCHEME ?? window.location.protocol.replace(':', '')
+  const origin =
+    env.VITE_ZT_PUBLIC_ORIGIN ?? `${scheme}://${window.location.host}`
   return {
     issuer,
     clientId: env.VITE_ZT_OIDC_CLIENT_ID ?? 'zt-console-app-001',
     audience: env.VITE_ZT_OIDC_AUDIENCE ?? 'zt-console-app-001',
-    redirectUri: env.VITE_ZT_OIDC_REDIRECT_URI ?? `${window.location.origin}${CALLBACK_PATH}`,
+    redirectUri: env.VITE_ZT_OIDC_REDIRECT_URI ?? `${origin}${CALLBACK_PATH}`,
     // The roles scope is what makes the provider put the user's roles in
     // the ID token. The console reads them to decide whether the operator
     // may use the master console.

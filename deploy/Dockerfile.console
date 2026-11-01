@@ -14,8 +14,21 @@ RUN npm ci
 COPY apps/console/ ./
 
 # The API base is a relative path, so the bundle works behind any host.
-ARG VITE_ZT_API_BASE=/api
-ENV VITE_ZT_API_BASE=${VITE_ZT_API_BASE}
+#
+# The public origin is where the browser reaches the console. It has to
+# match the redirect URI registered with the OIDC provider, so it is passed
+# in explicitly rather than derived from the request.
+ARG VITE_ZT_PUBLIC_ORIGIN
+ARG VITE_ZT_PUBLIC_SCHEME
+ARG VITE_ZT_OIDC_ISSUER
+ARG VITE_ZT_OIDC_CLIENT_ID
+ARG VITE_ZT_OIDC_AUDIENCE
+
+ENV VITE_ZT_PUBLIC_ORIGIN=${VITE_ZT_PUBLIC_ORIGIN}
+ENV VITE_ZT_PUBLIC_SCHEME=${VITE_ZT_PUBLIC_SCHEME}
+ENV VITE_ZT_OIDC_ISSUER=${VITE_ZT_OIDC_ISSUER}
+ENV VITE_ZT_OIDC_CLIENT_ID=${VITE_ZT_OIDC_CLIENT_ID}
+ENV VITE_ZT_OIDC_AUDIENCE=${VITE_ZT_OIDC_AUDIENCE}
 
 RUN npm run build
 

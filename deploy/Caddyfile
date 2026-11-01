@@ -1,22 +1,42 @@
 # The ZT-next console.
 #
-# Two origins are served here:
+# Three routes are served:
 #
-#   /            → the console's static bundle
-#   /api/        → the controller, behind Caddy so the controller never
-#                  holds a public socket
-#   /auth/       → the OIDC callback, which the console's JavaScript reads
+#   /              → the console's static bundle
+#   /api/          → the controller, which is not published to the host
+#   /auth/callback → the OIDC callback, which the console's JavaScript reads
 #
 # The controller requires a bearer token on every route except the health
 # check. The console obtains the token through the authorization code flow
 # with PKCE and sends it on every request.
+#
+# # TLS
+#
+# The host's ports 80 and 443 are held by the Verity stack, so this Caddy
+# listens on 8080 in plain HTTP. Put it behind the existing reverse proxy,
+# or terminate TLS here with ZT_TLS_CERT and ZT_TLS_KEY.
+#
+# When TLS is terminated upstream, the browser's request arrives over HTTP,
+# so the console must be told to build its callback URL with https. That is
+# the ZT_PUBLIC_SCHEME variable.
 
 {
 	admin off
 	email {$ACME_EMAIL}
 }
 
-{$ZT_PUBLIC_HOST} {
+# The listen address. The host's ports 80 and 443 are held by the Verity
+# stack, so this Caddy speaks plain HTTP and is expected to sit behind a
+# reverse proxy that terminates TLS.
+#
+# The scheme is explicit, so Caddy does not try to obtain a certificate.
+# The port is the container's port, which the compose file publishes on the
+# host.
+#
+# The site address is a bare port, so it answers on any hostname. A request
+# that arrives with a Host header the site does not name would otherwise
+# fall through to a default site block that serves nothing.
+:{$ZT_LISTEN_PORT:80} {
 	encode zstd gzip
 
 	# The API. The controller is not published, so it is reached over the
@@ -27,7 +47,7 @@
 
 	# The OIDC callback. The console's JavaScript reads the code from the
 	# URL, so the response has to be the console's page rather than a
-	# redirect that loses the fragment.
+	# redirect that loses the query string.
 	handle /auth/callback {
 		rewrite * /index.html
 		reverse_proxy console:80

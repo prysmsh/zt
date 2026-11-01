@@ -43,11 +43,22 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.console
+      args:
+        # The origin the browser reaches the console at. It has to match the
+        # redirect URI registered with the OIDC provider.
+        VITE_ZT_PUBLIC_ORIGIN: ${ZT_PUBLIC_ORIGIN:-}
+        VITE_ZT_PUBLIC_SCHEME: ${ZT_PUBLIC_SCHEME:-https}
+        VITE_ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://auth.prysm.sh/oidc}
+        VITE_ZT_OIDC_CLIENT_ID: ${ZT_OIDC_CLIENT_ID:-zt-console-app-001}
+        VITE_ZT_OIDC_AUDIENCE: ${ZT_OIDC_AUDIENCE:-zt-console-app-001}
     restart: unless-stopped
     expose:
       - "80"
 
   caddy:
+    # The name matters: the Verity stack's Caddy routes the console's
+    # hostname to this service by name, over the shared network.
+    container_name: zt-caddy
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
@@ -56,14 +67,27 @@ services:
       console:
         condition: service_started
     environment:
-      ZT_PUBLIC_HOST: ${ZT_PUBLIC_HOST:?ZT_PUBLIC_HOST is required}
+      ZT_LISTEN_PORT: ${ZT_LISTEN_PORT:-80}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      # The host's ports 80 and 443 are already held by the Verity stack, so
+      # the console is published on its own port. Put it behind the existing
+      # reverse proxy, or point a hostname at it directly.
+      - "${ZT_HTTP_PORT:-8080}:80"
+    networks:
+      - default
+      # The Verity stack's network, so the Caddy that terminates TLS for
+      # auth.prysm.sh can also route zt.hardening.dev here.
+      - verity
+
+networks:
+  verity:
+    external: true
+    name: ${ZT_VERITY_NETWORK:-verity-deploy_default}
 
 volumes:
   controller-data:
