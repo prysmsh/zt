@@ -101,6 +101,26 @@ All endpoints are under `/api/v1`.
 | `POST` | `/relays` | Create a relay |
 | `POST` | `/relays/{id}/drain` | Drain a relay before maintenance |
 | `GET` | `/events` | Audit log |
+| `POST` | `/join` | Ask to join a network (public, creates a pending node) |
+| `POST` | `/join/{id}/poll` | A pending node collects its credential with a signature |
+| `POST` | `/t/{tenant}/nodes/{id}/approve` | Approve a pending node (operator) |
+
+### The join flow
+
+`POST /join` takes a tenant slug, a network identifier, a name, and the
+client's hex-encoded Ed25519 and ML-DSA-65 public keys. It needs no
+token: knowing where to ask is enough to *ask*. The node it creates has
+no credential and no access — the security lives in the approval, not
+the join.
+
+The operator approves with `/t/{tenant}/nodes/{id}/approve`, which marks
+the node as accepted and issues nothing. The node then polls
+`/join/{id}/poll` with a hex-encoded Ed25519 signature over the literal
+string `zt-next-join-poll:{node_id}`. Before approval the poll answers
+`"Pending"`. After approval it returns an `Approved` object carrying a
+credential bound to the very key that signed the poll — so only the
+holder of the private half can collect, and no secret ever passes
+through the console.
 
 ## Creating a network
 
