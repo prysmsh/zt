@@ -104,6 +104,19 @@ All endpoints are under `/api/v1`.
 | `POST` | `/join` | Ask to join a network (public, creates a pending node) |
 | `POST` | `/join/{id}/poll` | A pending node collects its credential with a signature |
 | `POST` | `/t/{tenant}/nodes/{id}/approve` | Approve a pending node (operator) |
+| `POST` | `/t/{tenant}/nodes/reject-pending` | Revoke every credential-less join request |
+| `POST` | `/t/{tenant}/nodes/bulk-revoke` | Revoke a picked set of nodes |
+| `POST` | `/t/{tenant}/nodes/{id}/delete` | Delete a revoked node outright |
+| `POST` | `/t/{tenant}/nodes/delete-revoked` | Delete every revoked node |
+
+### Deletion
+
+Revocation is the decision; deletion is the cleanup after it. A node
+can only be deleted once revoked — deleting a live node answers 409.
+The row is removed for good, but the audit trail references nodes by
+name and identifier, so the history of what happened survives. `DELETE
+/nodes/{id}` still means *revoke*: it has meant that since before
+deletion existed, and clients call it that way.
 
 ### The join flow
 
