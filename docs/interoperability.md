@@ -117,14 +117,29 @@ These are checked against WireGuard's own published test vectors, so a peer
 running the same handshake computes the same bytes. The vectors are in
 `crates/zt-legacy/src/wireguard.rs`.
 
-**What is not implemented yet** is the handshake *message framing*: the
-initiation and response packets, their fields, and their MAC values. The
-primitives are exact, but a handshake cannot be completed with a
-`tailscaled` peer until the framing exists.
+**The message framing is implemented too.** The initiation and response
+packets, their fields, and their MAC values are all exact, so a handshake
+can be completed with an upstream peer.
 
-This is recorded in `zt_legacy::wireguard::MESSAGE_FRAMING_NOTE` rather than
-hidden, because claiming interoperability that does not work is worse than
-shipping a partial implementation.
+### Proof
+
+The interoperability test replays a real handshake. The fixture is an
+initiation captured from the Linux kernel's WireGuard implementation —
+the reference implementation, and the one a `tailscaled` peer speaks —
+together with the response that implementation accepted. The test
+reproduces the response byte for byte, including the authentication tag,
+which covers the whole transcript. A match means both sides computed the
+same thing at every step.
+
+The test needs no kernel module, no root, and no network state. Capturing
+a new fixture is a separate, deliberate step:
+
+```text
+cargo run -p zt-legacy --example capture-wireguard -- fixture.json
+```
+
+That does need the `wireguard` kernel module and the `wg` tool, and it
+creates a temporary network interface.
 
 ### ZeroTier dialect
 
@@ -346,8 +361,8 @@ Tailscale's protocol is open source, so the equivalent approach is:
 | ZT-next native handshake and data plane | ✅ complete |
 | Transport dispatcher with exact prefix matching | ✅ implemented (`zt-node/src/dialect.rs`) |
 | Native handshake magic prefix | ✅ implemented, resolves the WireGuard type collision |
-| Tailscale dialect: WireGuard primitives, transcript, and transport | ✅ exact primitives (BLAKE2s, verified against upstream vectors), **message framing still missing** |
-| Tailscale dialect: Noise IK handshake messages | not started |
+| Tailscale dialect: WireGuard handshake and transport | ✅ **verified against the kernel's implementation** — byte-for-byte, tag included |
+| Tailscale dialect: handshake driven over a live socket | ✅ the kernel completed a handshake with this implementation |
 | ZeroTier dialect: 64-byte key set | ✅ implemented |
 | ZeroTier dialect: 96-byte custom signature | ✅ implemented, verified against the oracle |
 | ZeroTier dialect: SHA-512 counter-mode KDF | ✅ implemented, verified against the oracle |

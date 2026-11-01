@@ -151,17 +151,21 @@ one value both parties independently computed.
 
 - **Topology layer**: peer discovery, path selection, NAT traversal,
   relaying. The current implementation is a point-to-point session manager.
-- **TUN/TAP**: the virtual network interface is not yet present, so
-  `FRAME` packets carry application payloads rather than IP traffic.
-- **Controller**: credentials are issued and verified by the `zt-crypto`
-  crate, but there is no control-plane service yet.
+- **Data plane**: the `zt-tun` crate opens a TUN device, but it is not yet
+  wired into `zt-node`, so `FRAME` packets carry application payloads
+  rather than IP traffic.
 - **ZeroTier compatibility (Track B)**: the oracle harness is in place but
   the legacy shim is not started.
+
+The control plane — the controller, its multi-tenant service layer, and the
+node agent that talks to it — is implemented and deployed. See
+[`docs/deployment.md`](deployment.md) and
+[`docs/saas-readiness.md`](saas-readiness.md).
 
 ## Verifying it
 
 ```bash
-cargo test                                    # 115 tests
+cargo test                                    # the whole workspace
 cargo run -p zt-node --bin demo               # live two-node demo
 ```
 

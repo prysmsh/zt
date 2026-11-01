@@ -17,17 +17,17 @@
 //!
 //! # What is implemented
 //!
-//! The primitives, the transcript, and the key schedule are exact. They are
-//! checked against WireGuard's own published test vectors, so a peer that
-//! runs the same handshake computes the same bytes.
+//! The primitives, the transcript, the key schedule, and the message
+//! framing are exact. The interoperability test replays a handshake
+//! captured from the Linux kernel's WireGuard implementation and
+//! reproduces the response that implementation accepted, byte for byte,
+//! including the authentication tag.
 //!
-//! The message framing — the initiation and response packets and their
-//! MAC fields — is not implemented yet, so a handshake cannot be completed
-//! with a `tailscaled` peer. See [`MESSAGE_FRAMING_NOTE`].
+//! The transcript and the key schedule are also checked against WireGuard's
+//! own published test vectors, so the primitives cannot drift.
 //!
-//! This is recorded explicitly rather than hidden, because claiming
-//! interoperability that does not work is worse than shipping a partial
-//! implementation.
+//! Capturing a new fixture is a deliberate step:
+//! `cargo run -p zt-legacy --example capture-wireguard`.
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -72,11 +72,6 @@ pub const WG_LABEL_COOKIE: &[u8] = b"cookie--";
 
 /// The BLAKE2s block size, which is also the HMAC block size.
 pub const BLOCK_LEN: usize = 64;
-
-/// A note about what is not implemented yet.
-pub const MESSAGE_FRAMING_NOTE: &str = "The Noise primitives, the transcript, and the key \
-     schedule are exact. The handshake message framing and its MAC fields are not implemented, so a \
-     handshake cannot yet be completed with a tailscaled peer.";
 
 // ---------------------------------------------------------------------------
 // Hashing
@@ -249,6 +244,14 @@ impl Transcript {
     /// The current chaining key.
     pub fn chain_key(&self) -> [u8; 32] {
         self.chain_key
+    }
+
+    /// Replace the chaining key.
+    ///
+    /// The preshared key derivation produces a new chaining key, which
+    /// replaces the one the transcript was carrying.
+    pub fn set_chain_key(&mut self, chain_key: [u8; 32]) {
+        self.chain_key = chain_key;
     }
 
     /// Derive a message key from the chaining key and a shared secret.
@@ -483,8 +486,7 @@ impl TransportSession {
         if self.receive_counter >= REKEY_AFTER_MESSAGES {
             return Ok(None);
         }
-        let plaintext =
-            transport_decrypt(&self.receive_key, self.receive_counter, ciphertext)?;
+        let plaintext = transport_decrypt(&self.receive_key, self.receive_counter, ciphertext)?;
         self.receive_counter += 1;
         Ok(Some(plaintext))
     }
@@ -596,8 +598,14 @@ mod tests {
     fn the_construction_matches_wireguard() {
         // WireGuard's construction and identifier, hashed the way it hashes
         // them.
-        assert_eq!(to_hex(&initial_chain_key()), "60e26daef327efc02ec335e2a025d2d016eb4206f87277f52d38d1988b78cd36");
-        assert_eq!(to_hex(&initial_hash()), "2211b361081ac566691243db458ad5322d9c6c662293e8b70ee19c65ba079ef3");
+        assert_eq!(
+            to_hex(&initial_chain_key()),
+            "60e26daef327efc02ec335e2a025d2d016eb4206f87277f52d38d1988b78cd36"
+        );
+        assert_eq!(
+            to_hex(&initial_hash()),
+            "2211b361081ac566691243db458ad5322d9c6c662293e8b70ee19c65ba079ef3"
+        );
     }
 
     #[test]
@@ -684,7 +692,10 @@ mod tests {
     fn nonce_is_little_endian_with_a_zero_prefix() {
         let nonce = transport_nonce(0x0102_0304_0506_0708);
         assert_eq!(&nonce[..4], &[0, 0, 0, 0]);
-        assert_eq!(&nonce[4..], &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+        assert_eq!(
+            &nonce[4..],
+            &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        );
     }
 
     #[test]

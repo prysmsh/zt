@@ -1,0 +1,11 @@
+{
+  "accepted_response": "020000009d241caa30f6075ceed999d4adefb357e099c1d99f555cef6c2f51895d2014e610da83d13e493d22255aaa978f5c20e81c6e543e684d80b896467896c9eec9a5f12ef15175c6f7b400000000000000000000000000000000",
+  "description": "A handshake initiation captured from the Linux kernel's WireGuard implementation, and the response it accepted.",
+  "implementation_ephemeral_secret": "fb9c73722aee044f505e59fdb5e6f33d22f3b7645cdaeb7b228a4da97d0198e5",
+  "implementation_index": 2853971101,
+  "implementation_public_key": "+FMr0fBIHtll6pJGkQMApN+MmyURUtAXWr7mpym40X4=",
+  "implementation_static_secret": "de93d97ab6713de3193a7f2075b778e7089185188d7ed778762c877c0f7ccc89",
+  "initiation": "0100000030f6075cb0a532991fcc8459d331304739f28fc026dca6960f62f16aa568a09ddaeee70a620f3d6b0cc778eb3174e2de7d79243e0a1883eb04d7e1e375f0e1c85807c4a5aa70b125bb41261ef2cb57b45aad9076a9a92c63b672f2c9363e42d134971b5a9992caecff6670e511315c3c45c9a1e7da71439c8b06358af4bae0ad00000000000000000000000000000000",
+  "kernel_listen_port": 52980,
+  "kernel_public_key": "EsM95p2i8Ou3/P9Xkx0Zp0Vikfl7tCKYxGrQtnH5GE8="
+}
