@@ -42,6 +42,7 @@ OPTIONS:
     --state <PATH>        Path to the node state file (default: zt-node.json)
     --interface <NAME>    Interface to open for the data plane (default: zt0)
     --listen <ADDR:PORT>  Address the node listens on (default: 0.0.0.0:9994)
+    --relay               Forward packets between the others (no interface)
     --interval <SECONDS>  Repeat the check-in every so many seconds
     --force               Renew even when the credential is not yet due
     -h, --help            Print this help
@@ -87,6 +88,7 @@ struct Options {
     interface: String,
     listen: String,
     interval: Option<u64>,
+    relay: bool,
 }
 
 /// Parse the command line.
@@ -104,6 +106,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
         interface: "zt0".to_string(),
         listen: "0.0.0.0:9994".to_string(),
         interval: None,
+        relay: false,
     };
 
     let mut index = 0;
@@ -116,7 +119,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
             }
             "--force" => options.force = true,
             "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state"
-            | "--credential" | "--interface" | "--listen" | "--interval" => {
+            | "--credential" | "--interface" | "--listen" | "--interval" | "--relay" => {
                 index += 1;
                 let value = arguments
                     .get(index)
@@ -142,6 +145,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
                             AgentError::Usage(format!("'{value}' is not a number of seconds"))
                         })?)
                     }
+                    "--relay" => options.relay = true,
                     _ => unreachable!(),
                 }
             }
@@ -427,6 +431,7 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
         interface: options.interface.clone(),
         mtu: 1400,
         listen,
+        relay: options.relay,
         ..Default::default()
     };
 
