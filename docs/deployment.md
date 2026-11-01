@@ -241,7 +241,7 @@ Verity runs two HTTP listeners, and the **port selects the tenant**:
 
 | Listener | Tenant | Issuer |
 |---|---|---|
-| `3001` | core (default) | `https://auth.prysm.sh/oidc` |
+| `3001` | core (default) | `https://prysm.sh/oidc` |
 | `3003` | admin | `https://admin.prysm.sh/oidc` |
 
 Each tenant runs its own OIDC provider with its own issuer URL, so the two
@@ -253,12 +253,6 @@ application, and the management API's CORS allowlist — which is built from
 A separate hostname is the clean way to differ. A separate port also works,
 and the old `https://auth.prysm.sh:8443/console` address is kept working so
 that a bookmark does not break during the rollout.
-
-### The DNS record
-
-`admin.prysm.sh` is a CNAME to the same Cloudflare-proxied address as
-`auth.prysm.sh`, and `prysm.sh`'s zone is in Cloudflare's **Full** SSL
-mode, so the origin's self-signed certificate is accepted.
 
 ### The origin is embedded in the resource indicators
 
@@ -274,8 +268,6 @@ Both origins are registered, so a client on either one resolves:
 | Me API (admin origin) | `https://admin.prysm.sh/me` |
 | Cloud API (admin origin) | `https://admin.prysm.sh/api` |
 | Me API (apex) | `https://prysm.sh/me` |
-| Me API (old origin) | `https://auth.prysm.sh:8443/me` |
-| Cloud API (old origin) | `https://auth.prysm.sh:8443/api` |
 | Management API (admin tenant) | `https://prysm.sh/_tenants/admin/api` |
 | Management API (default tenant) | `https://prysm.sh/_tenants/default/api` |
 
@@ -285,17 +277,45 @@ These live in the Verity deployment, not in this repository:
 
 | Setting | Value |
 |---|---|
-| `ENDPOINT` | `https://auth.prysm.sh` |
+| `ENDPOINT` | `https://prysm.sh` |
 | `ADMIN_ENDPOINT` | `https://admin.prysm.sh` |
 | `ADMIN_PORT` | `3003` |
 
-The origin's certificate must cover the admin hostname:
+The origin's certificate must cover both hostnames:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout key.pem -out cert.pem \
   -days 3650 -subj "/CN=auth.prysm.sh" \
   -addext "subjectAltName=DNS:auth.prysm.sh,DNS:*.auth.prysm.sh,DNS:prysm.sh,DNS:*.prysm.sh,DNS:admin.prysm.sh,DNS:zt.hardening.dev"
+```
+
+### The console's loading screen
+
+While the console boots it shows the platform's logo above a spinner. That
+splash is replaced as soon as the console mounts, so hiding it removes the
+branding without changing anything the operator uses.
+
+`deploy/verity/patch-console.js` injects a rule into the console's HTML
+before the server starts:
+
+```css
+#app>div:has(>svg+span){display:none!important}
+```
+
+The selector matches the loading screen's shape — a div holding an svg and
+a span — and nothing in the mounted console matches it. The patch is
+idempotent, so it is safe on every start.
+
+The Verity deployment runs it by mounting the script and calling it from
+the service's command:
+
+```yaml
+    entrypoint: ["sh", "-c"]
+    command:
+      - npm run cli db seed -- --swe && npm run cli db alteration deploy "…" && node /etc/logto/zt-patch-console.js && npm start
+    volumes:
+      - ./patch-console.js:/etc/logto/zt-patch-console.js:ro
 ```
 
 ## Operating

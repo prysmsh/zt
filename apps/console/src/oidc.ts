@@ -73,7 +73,7 @@ export const CALLBACK_PATH = '/auth/callback'
  * because the console is a static bundle with no server to ask.
  */
 export function oidcConfig(env: Record<string, string | undefined> = import.meta.env): OidcConfig {
-  const issuer = (env.VITE_ZT_OIDC_ISSUER ?? 'https://auth.prysm.sh/oidc').replace(/\/+$/, '')
+  const issuer = (env.VITE_ZT_OIDC_ISSUER ?? 'https://prysm.sh/oidc').replace(/\/+$/, '')
   // The scheme matters: the redirect URI has to be the one the browser
   // actually used, or the provider refuses the exchange. When TLS is
   // terminated upstream, the page is served over HTTPS even though the
