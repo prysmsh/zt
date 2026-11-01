@@ -41,7 +41,7 @@ COPY --from=builder /build/dist /usr/share/nginx/html
 # The console is served under /console, because the landing page is the
 # front door. The bundle's assets live with it.
 RUN mkdir -p /usr/share/nginx/html/console \
-    && mv /usr/share/nginx/html/assets /usr/share/nginx/html/console/assets \
+    && cp -r /usr/share/nginx/html/assets /usr/share/nginx/html/console/assets \
     && cp /usr/share/nginx/html/index.html /usr/share/nginx/html/console/index.html \
     && cp /usr/share/nginx/html/50x.html /usr/share/nginx/html/console/50x.html \
     && cp /usr/share/nginx/html/robots.txt /usr/share/nginx/html/console/robots.txt
