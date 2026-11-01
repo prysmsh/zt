@@ -66,6 +66,11 @@ fn build_router(controller: Controller) -> Router {
         // What a tenant owes for the period. The tenant sees its own, and
         // the operator sees any tenant's.
         .route("/api/v1/t/{tenant}/billing", get(tenant_billing))
+        // The agent asks the controller what address it appears from, so it
+        // can tell its peers where to reach it. This is how NAT traversal
+        // works without a STUN server: the controller sits on the public
+        // internet and sees the source address of every request.
+        .route("/api/v1/my-endpoint", get(my_endpoint))
         .route("/api/v1/tenants/{id}/billing", get(tenant_billing_for))
         .route("/api/v1/tenants/{id}/events", get(tenant_events))
         .route("/api/v1/tenants/{id}", delete(delete_tenant))
@@ -280,6 +285,35 @@ async fn delete_tenant(
 struct UsageResponse {
     usage: crate::tenant::TenantUsage,
     limits: TenantLimits,
+}
+
+/// The public address the agent appears from.
+///
+/// Cloudflare and Caddy both add forwarded headers, so the controller sees
+/// the real source address even though the request arrived through two
+/// proxies. The agent reports this address as its endpoint, so its peers
+/// can reach it through the NAT.
+async fn my_endpoint(
+    headers: axum::http::HeaderMap,
+) -> Json<serde_json::Value> {
+    // The forwarded headers, in the order the proxies add them. The first
+    // one that is set is the one closest to the client, which is the
+    // address the rest of the internet sees.
+    let source = headers
+        .get("cf-connecting-ip")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| {
+            headers
+                .get("x-forwarded-for")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(',').next())
+                .map(|value| value.trim().to_string())
+                .unwrap_or_default()
+        });
+
+    Json(serde_json::json!({ "address": source }))
 }
 
 /// What a tenant owes for the period that contains today.

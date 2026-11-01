@@ -213,9 +213,25 @@ impl Runner {
 
     /// Report how the node's peers reach it, and what it carried.
     ///
-    /// The count is taken, so the same bytes are never reported twice.
+    /// The endpoint is the address the controller observes the node from,
+    /// which is the address a peer outside the NAT can reach. The count is
+    /// taken, so the same bytes are never reported twice.
     pub fn report_presence(&mut self, pq_public_key: &str) -> Result<()> {
-        let endpoint = self.node.local_addr().to_string();
+        let listen_port = self.node.local_addr().port();
+        let public_ip = self
+            .client
+            .observed_endpoint()
+            .unwrap_or_default();
+
+        let endpoint = if public_ip.is_empty() {
+            // The controller could not tell us, so we fall back to the
+            // address we listen on. A node on the same network as the
+            // controller can still be reached.
+            format!("{}:{}", self.node.local_addr().ip(), listen_port)
+        } else {
+            format!("{}:{}", public_ip, listen_port)
+        };
+
         let usage = self.plane.take_usage();
 
         self.client.report_presence(

@@ -267,6 +267,20 @@ impl ControllerClient {
         self.get(&self.tenant_url("topology"))
     }
 
+    /// Ask the controller what address this agent appears from.
+    ///
+    /// The controller sits on the public internet, so the source address
+    /// of the request is the address the rest of the internet sees. A node
+    /// behind a NAT uses this to learn its public endpoint, and its peers
+    /// use that endpoint to reach it.
+    pub fn observed_endpoint(&self) -> Result<String> {
+        let result: serde_json::Value = self.get("/api/v1/my-endpoint")?;
+        Ok(result["address"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
+    }
+
     /// Report how this node's peers reach it, and what it carried.
     ///
     /// The endpoint is where the node listens. The post-quantum key is the
