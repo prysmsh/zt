@@ -24,8 +24,8 @@ use zt_crypto::identity::{Address, Identity};
 use crate::address::{assign_address, Ipv4Range};
 use crate::error::{ControllerError, Result};
 use crate::model::{
-    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeKeys, NodeStatus,
-    Policy, Relay, RelayStatus, Topology, TopologyPeer,
+    now_unix, Actor, AuditEvent, ControllerState, EntityId, Health, Network, Node, NodeKeys,
+    NodeStatus, Policy, Relay, RelayStatus, Topology, TopologyPeer,
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
@@ -69,7 +69,54 @@ impl Controller {
     /// identity is provided by the caller so that it can be persisted
     /// separately from the operational data.
     pub fn with_store(identity: ControllerIdentity, store: Arc<dyn Store>) -> Result<Self> {
-        let state = store.load()?;
+        let mut state = store.load()?;
+
+        // A node enrolled before the data plane existed has no address in
+        // its network's range. It is given one at startup, so the topology
+        // it is handed is usable.
+        let mut changed = false;
+        let unassigned: Vec<EntityId> = state
+            .nodes
+            .values()
+            .filter(|node| node.ipv4_address.is_empty())
+            .map(|node| node.id.clone())
+            .collect();
+
+        for id in unassigned {
+            let Some(network_id) = state.nodes.get(&id).map(|node| node.network_id.clone()) else {
+                continue;
+            };
+
+            let Some(network) = state.networks.get(&network_id) else {
+                continue;
+            };
+
+            let Ok(range) = Ipv4Range::parse(&network.cidr) else {
+                continue;
+            };
+
+            let used: HashSet<u32> = state
+                .nodes
+                .values()
+                .filter(|other| other.network_id == network_id)
+                .filter_map(|other| other.ipv4_address.parse::<Ipv4Addr>().ok())
+                .map(u32::from)
+                .collect();
+
+            let Some(address) = assign_address(&range, &used) else {
+                continue;
+            };
+
+            if let Some(node) = state.nodes.get_mut(&id) {
+                node.ipv4_address = address;
+                changed = true;
+            }
+        }
+
+        if changed {
+            store.save(&state)?;
+        }
+
         Ok(Self {
             inner: Arc::new(ControllerInner {
                 identity,

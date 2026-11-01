@@ -9,7 +9,7 @@ fn pq_public_key() -> Vec<u8> {
     vec![7u8; 1952]
 }
 
-use zt_controller::{Controller, Deployment, IdentityStore, SqliteStore, TenantLimits};
+use zt_controller::{Controller, Deployment, IdentityStore, SqliteStore, Store, TenantLimits};
 use zt_crypto::credential::ControllerIdentity;
 use zt_crypto::identity::Identity;
 
@@ -30,6 +30,59 @@ async fn tenant(controller: &Controller, name: &str) -> String {
         .await
         .expect("tenant")
         .id
+}
+
+#[tokio::test]
+async fn a_node_without_an_address_is_given_one_at_startup() {
+    // A node enrolled before the data plane existed has no address in its
+    // network's range. The controller gives it one when it starts, so the
+    // topology it is handed is usable.
+    let store = Arc::new(SqliteStore::open_in_memory().expect("store"));
+    let controller = Controller::with_store(identity(), store.clone()).expect("controller");
+
+    let tenant_id = tenant(&controller, "Acme").await;
+    let network = controller
+        .create_network(
+            &tenant_id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    let (node, _) = controller
+        .enroll_node(
+            &tenant_id,
+            &network.id,
+            "web-01".into(),
+            NodeKeys {
+                ed25519: [1u8; 32],
+                ml_dsa: pq_public_key(),
+            },
+            Vec::new(),
+            &Actor::system(),
+        )
+        .await
+        .expect("node");
+
+    assert_eq!(node.ipv4_address, "10.42.0.1");
+
+    // The address is taken away, the way an older database would have it.
+    let mut state = store.load().expect("state");
+    state.nodes.get_mut(&node.id).expect("node").ipv4_address = String::new();
+    store.save(&state).expect("save");
+
+    // The controller starts again over the same store.
+    let controller = Controller::with_store(identity(), store.clone()).expect("controller");
+    let topology = controller
+        .topology_for(&tenant_id, &node.id)
+        .await
+        .expect("topology");
+
+    assert_eq!(topology.address, "10.42.0.1");
 }
 
 #[tokio::test]
