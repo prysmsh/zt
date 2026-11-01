@@ -1,0 +1,19 @@
+[Unit]
+Description=ZT-next node agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The agent checks in with the controller and asks for the topology. It
+# keeps doing so, which is what keeps the console showing the node as
+# online.
+#
+# A node that also carries traffic runs `zt-agent run` instead, with the
+# interface configured by the operating system.
+ExecStart=%h/zt-agent checkin --controller ${ZT_CONTROLLER_URL} --tenant ${ZT_TENANT_ID} --state %h/zt-node/node.json --interval 30
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

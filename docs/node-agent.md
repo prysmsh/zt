@@ -55,6 +55,7 @@ Renewed credential for web-01
 | `renew` | Renew the credential, if it is due |
 | `status` | Show enrollment state and credential expiry |
 | `identity` | Print the node's public key |
+| `checkin` | Tell the controller the node is here, and fetch the topology |
 | `run` | Carry traffic: open the interface and forward packets |
 
 ### Options
@@ -68,8 +69,28 @@ Renewed credential for web-01
 | `--tags <A,B>` | Comma-separated tags |
 | `--state <PATH>` | State file path. Default `zt-node.json` |
 | `--force` | Renew even when the credential is not yet due |
+| `--interval <SECONDS>` | Repeat the check-in every so many seconds |
 | `--interface <NAME>` | Interface to open for the data plane. Default `zt0` |
 | `--listen <ADDR:PORT>` | Address the node listens on. Default `0.0.0.0:9994` |
+
+## Checking in
+
+The console shows a node as online while it keeps hearing from it, and as
+offline once it stops. A node checks in by reporting its presence and
+asking for the topology.
+
+```text
+$ zt-agent checkin --controller https://zt.example.dev --tenant acme \
+    --interval 30
+Checked in as 10.42.0.7 in 10.42.0.0/24
+  peers:   3
+```
+
+Without an interval it checks in once and prints what it learned. With one
+it keeps checking in, which is what a node that carries the control plane
+but not the traffic runs.
+
+`deploy/zt-agent.service` is that as a systemd unit.
 
 ## Carrying traffic
 

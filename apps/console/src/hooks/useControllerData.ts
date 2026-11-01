@@ -110,52 +110,90 @@ export function useNetworkSummaries(data: ControllerSnapshot): Network[] {
   }, [data.networks, data.nodes, data.relays])
 }
 
+/** An item on the attention list. */
+export interface AttentionItem {
+  id: string
+  level: 'warning' | 'error'
+  title: string
+  detail: string
+  time: string
+}
+
+/**
+ * Whether a credential is close enough to expiring to be worth flagging.
+ *
+ * The console renders the remaining lifetime as `Expired`, `Expires in
+ * 42m`, `Expires in 3h` or `Expires in 12d`. Only the first three are
+ * close enough to matter.
+ */
+function needsAttention(credentialExpires: string): boolean {
+  if (credentialExpires === 'Expired') {
+    return true
+  }
+
+  return /^Expires in (\d+[mh])/.test(credentialExpires)
+}
+
+/**
+ * The items that need operator attention.
+ *
+ * This is the substance of the attention list, kept apart from the hook so
+ * it can be reasoned about on its own.
+ */
+export function attentionItems(data: ControllerSnapshot): AttentionItem[] {
+  const items: AttentionItem[] = []
+
+  for (const node of data.nodes) {
+    if (node.status === 'revoked') {
+      items.push({
+        id: `revoked-${node.id}`,
+        level: 'error',
+        title: `${node.name} is revoked`,
+        detail: 'Access has been withdrawn. Renewals are blocked.',
+        time: node.lastSeen,
+      })
+    } else if (node.status === 'offline') {
+      items.push({
+        id: `offline-${node.id}`,
+        level: 'error',
+        title: `${node.name} is offline`,
+        detail: `Last seen ${node.lastSeen}.`,
+        time: node.lastSeen,
+      })
+    }
+    // A revoked node's renewals are blocked, so its credential is not
+    // going to be renewed. It is already reported above.
+    //
+    // A credential that is days from expiring is not worth an operator's
+    // attention: the node renews it long before then. One that is hours
+    // away, or gone, is.
+    if (node.status !== 'revoked' && needsAttention(node.credentialExpires)) {
+      items.push({
+        id: `credential-${node.id}`,
+        level: 'warning',
+        title: `Credential ${node.credentialExpires.toLowerCase()}`,
+        detail: `${node.name} needs a renewal before it drops off the mesh.`,
+        time: node.lastSeen,
+      })
+    }
+  }
+
+  for (const relay of data.relays) {
+    if (relay.status === 'degraded' || relay.status === 'offline') {
+      items.push({
+        id: `relay-${relay.id}`,
+        level: 'warning',
+        title: `Relay ${relay.name} is ${relay.status}`,
+        detail: 'Peers that depend on this relay may lose connectivity.',
+        time: 'now',
+      })
+    }
+  }
+
+  return items
+}
+
 /** Items that need operator attention. */
 export function useAttentionItems(data: ControllerSnapshot) {
-  return useMemo(() => {
-    const items: Array<{ id: string; level: 'warning' | 'error'; title: string; detail: string; time: string }> = []
-
-    for (const node of data.nodes) {
-      if (node.status === 'revoked') {
-        items.push({
-          id: `revoked-${node.id}`,
-          level: 'error',
-          title: `${node.name} is revoked`,
-          detail: 'Access has been withdrawn. Renewals are blocked.',
-          time: node.lastSeen,
-        })
-      } else if (node.status === 'offline') {
-        items.push({
-          id: `offline-${node.id}`,
-          level: 'error',
-          title: `${node.name} is offline`,
-          detail: `Last seen ${node.lastSeen}.`,
-          time: node.lastSeen,
-        })
-      }
-      if (node.credentialExpires.startsWith('Expires in ')) {
-        items.push({
-          id: `credential-${node.id}`,
-          level: 'warning',
-          title: `Credential ${node.credentialExpires.toLowerCase()}`,
-          detail: `${node.name} needs a renewal before it drops off the mesh.`,
-          time: node.lastSeen,
-        })
-      }
-    }
-
-    for (const relay of data.relays) {
-      if (relay.status === 'degraded' || relay.status === 'offline') {
-        items.push({
-          id: `relay-${relay.id}`,
-          level: 'warning',
-          title: `Relay ${relay.name} is ${relay.status}`,
-          detail: 'Peers that depend on this relay may lose connectivity.',
-          time: 'now',
-        })
-      }
-    }
-
-    return items
-  }, [data.nodes, data.relays])
+  return useMemo(() => attentionItems(data), [data.nodes, data.relays])
 }

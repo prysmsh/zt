@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest'
+
+import { attentionItems } from './useControllerData'
+import type { ControllerSnapshot } from './useControllerData'
+import type { MeshNode, Relay } from '../types'
+
+/** A node in the console's view model. */
+const node = (overrides: Partial<MeshNode> & Pick<MeshNode, 'id' | 'name'>): MeshNode => ({
+  address: 'a1b2c3',
+  network: 'Production',
+  status: 'online',
+  role: 'Node',
+  platform: 'linux',
+  version: '1.0',
+  lastSeen: 'now',
+  directPeers: 0,
+  relayedPeers: 0,
+  credentialExpires: 'Expires in 12h',
+  tags: [],
+  fingerprint: 'ab cd',
+  ...overrides,
+})
+
+/** A relay in the console's view model. */
+const relay = (overrides: Partial<Relay> & Pick<Relay, 'id' | 'name'>): Relay => ({
+  address: '10.0.0.1',
+  endpoint: '198.51.100.1:9994',
+  networks: 1,
+  sessions: 2,
+  availability: 99.9,
+  bandwidth: '1 Gbps',
+  status: 'healthy',
+  enabled: true,
+  ...overrides,
+})
+
+/** A snapshot with the given nodes and relays. */
+const snapshot = (nodes: MeshNode[], relays: Relay[] = []): ControllerSnapshot => ({
+  networks: [],
+  nodes,
+  relays,
+  policies: [],
+  events: [],
+})
+
+describe('the attention list', () => {
+  it('reports a node that is offline', () => {
+    const items = attentionItems(
+      snapshot([node({ id: 'a', name: 'web-01', status: 'offline' })])
+    )
+
+    expect(items.some((item) => item.title === 'web-01 is offline')).toBe(true)
+  })
+
+  it('reports a credential that is about to expire', () => {
+    const items = attentionItems(snapshot([node({ id: 'a', name: 'web-01' })]))
+
+    expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(true)
+  })
+
+  it('does not ask a revoked node for a renewal', () => {
+    // A revoked node's renewals are blocked, so asking for one is
+    // nonsense: the credential is not going to be renewed.
+    const items = attentionItems(
+      snapshot([node({ id: 'a', name: 'web-01', status: 'revoked' })])
+    )
+
+    expect(items.some((item) => item.title === 'web-01 is revoked')).toBe(true)
+    expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(false)
+  })
+
+  it('says nothing about a node that is online and in credit', () => {
+    const items = attentionItems(
+      snapshot([
+        node({
+          id: 'a',
+          name: 'web-01',
+          status: 'online',
+          credentialExpires: 'Expires in 12d',
+        }),
+      ])
+    )
+
+    expect(items).toHaveLength(0)
+  })
+
+  it('reports a credential that has expired', () => {
+    const items = attentionItems(
+      snapshot([
+        node({ id: 'a', name: 'web-01', status: 'online', credentialExpires: 'Expired' }),
+      ])
+    )
+
+    expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(true)
+  })
+
+  it('reports a credential that is hours from expiring', () => {
+    const items = attentionItems(
+      snapshot([
+        node({ id: 'a', name: 'web-01', status: 'online', credentialExpires: 'Expires in 3h' }),
+      ])
+    )
+
+    expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(true)
+  })
+
+  it('reports a relay that is degraded', () => {
+    const items = attentionItems(
+      snapshot([], [relay({ id: 'r', name: 'eu-1', status: 'degraded' })])
+    )
+
+    expect(items.some((item) => item.title === 'Relay eu-1 is degraded')).toBe(true)
+  })
+})
