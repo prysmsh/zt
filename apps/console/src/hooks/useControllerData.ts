@@ -91,23 +91,30 @@ export function useControllerData(api: ApiClient, intervalMs = 15_000): Controll
 }
 
 /** Derive network summaries that include live node and relay counts. */
+export function networkSummaries(data: ControllerSnapshot): Network[] {
+  return data.networks.map((network) => {
+    // A revoked node is not part of the fleet: it cannot come online,
+    // so counting it would make a healthy network look degraded.
+    const nodes = data.nodes.filter(
+      (node) => node.network === network.id && node.status !== 'revoked'
+    )
+    const online = nodes.filter((node) => node.status === 'online').length
+    const offline = nodes.filter((node) => node.status === 'offline').length
+    const relays = data.relays.filter((relay) => relay.networks > 0).length
+    const status = offline > 0 ? 'attention' : online === 0 && nodes.length > 0 ? 'degraded' : 'healthy'
+    return {
+      ...network,
+      nodeCount: nodes.length,
+      onlineCount: online,
+      relayCount: relays,
+      status,
+    }
+  })
+}
+
+/** Derive network summaries that include live node and relay counts. */
 export function useNetworkSummaries(data: ControllerSnapshot): Network[] {
-  return useMemo(() => {
-    return data.networks.map((network) => {
-      const nodes = data.nodes.filter((node) => node.network === network.id)
-      const online = nodes.filter((node) => node.status === 'online').length
-      const offline = nodes.filter((node) => node.status === 'offline' || node.status === 'revoked').length
-      const relays = data.relays.filter((relay) => relay.networks > 0).length
-      const status = offline > 0 ? 'attention' : online === 0 && nodes.length > 0 ? 'degraded' : 'healthy'
-      return {
-        ...network,
-        nodeCount: nodes.length,
-        onlineCount: online,
-        relayCount: relays,
-        status,
-      }
-    })
-  }, [data.networks, data.nodes, data.relays])
+  return useMemo(() => networkSummaries(data), [data.networks, data.nodes, data.relays])
 }
 
 /** An item on the attention list. */

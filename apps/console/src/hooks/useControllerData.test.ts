@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { attentionItems } from './useControllerData'
+import { attentionItems, networkSummaries } from './useControllerData'
 import type { ControllerSnapshot } from './useControllerData'
-import type { MeshNode, Relay } from '../types'
+import type { MeshNode, Network, Relay } from '../types'
 
 /** A node in the console's view model. */
 const node = (overrides: Partial<MeshNode> & Pick<MeshNode, 'id' | 'name'>): MeshNode => ({
@@ -34,9 +34,25 @@ const relay = (overrides: Partial<Relay> & Pick<Relay, 'id' | 'name'>): Relay =>
   ...overrides,
 })
 
+/** A network in the console's view model. */
+const network = (overrides: Partial<Network> & Pick<Network, 'id' | 'name'>): Network => ({
+  description: '',
+  cidr: '10.42.0.0/24',
+  nodeCount: 0,
+  onlineCount: 0,
+  relayCount: 0,
+  status: 'healthy',
+  accent: 'cyan',
+  ...overrides,
+})
+
 /** A snapshot with the given nodes and relays. */
-const snapshot = (nodes: MeshNode[], relays: Relay[] = []): ControllerSnapshot => ({
-  networks: [],
+const snapshot = (
+  nodes: MeshNode[],
+  relays: Relay[] = [],
+  networks: Network[] = []
+): ControllerSnapshot => ({
+  networks,
   nodes,
   relays,
   policies: [],
@@ -102,6 +118,25 @@ describe('the attention list', () => {
     )
 
     expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(true)
+  })
+
+  it('counts a revoked node out of the fleet', () => {
+    // A revoked node cannot come online, so it is not part of the fleet
+    // and must not make a network look degraded.
+    const networks = networkSummaries(
+      snapshot(
+        [
+          node({ id: 'a', name: 'web-01', status: 'online', network: 'n' }),
+          node({ id: 'b', name: 'old-01', status: 'revoked', network: 'n' }),
+        ],
+        [],
+        [network({ id: 'n', name: 'Production' })]
+      )
+    )
+
+    expect(networks[0].nodeCount).toBe(1)
+    expect(networks[0].onlineCount).toBe(1)
+    expect(networks[0].status).toBe('healthy')
   })
 
   it('reports a relay that is degraded', () => {

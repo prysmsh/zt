@@ -230,8 +230,11 @@ function Overview({
   const networks = useNetworkSummaries(data)
   const attention = useAttentionItems(data)
 
-  const totalNodes = data.nodes.length
-  const onlineNodes = data.nodes.filter((node) => node.status === 'online').length
+  // A revoked node is not part of the fleet: it cannot come online, so
+  // counting it would understate how much of the mesh is up.
+  const fleet = data.nodes.filter((node) => node.status !== 'revoked')
+  const totalNodes = fleet.length
+  const onlineNodes = fleet.filter((node) => node.status === 'online').length
   const healthyRelays = data.relays.filter((relay) => relay.status === 'healthy').length
   const onlinePercent = totalNodes === 0 ? 0 : Math.round((onlineNodes / totalNodes) * 100)
 
