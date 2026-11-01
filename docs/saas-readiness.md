@@ -67,23 +67,45 @@ tenant sees only its own events.
 
 ## Not ready
 
-### No data plane
+### The data plane is not finished
 
-**This is the biggest gap.** The protocol layer is complete and tested —
-two nodes handshake, exchange frames, and reject replays — but there is no
-TUN device and no packet forwarding. Traffic does not route between nodes.
+The forwarding path is there and tested. A node reads an IP packet from
+its virtual interface, looks up the peer that owns the destination, sends
+it over the session, and writes the frames the peers send back to the
+interface. The test drives two nodes over real UDP sockets and watches a
+packet cross the overlay and land on the other device.
 
-Everything above is the control plane for a network that cannot yet carry
-traffic. A tenant would get a working management console and a working
-credential system for a mesh that does not pass packets.
+What is missing is the wiring around it:
 
-### No Tailscale interoperability
+- **The overlay addresses.** A node needs an IPv4 address in its
+  network's range, and it needs the addresses of its peers. The
+  controller derives a ten-byte protocol address for every node, but it
+  assigns nothing out of the network's IPv4 range, and the data plane
+  routes on that range.
+- **The topology.** Nothing tells a node where its peers are or how to
+  reach them. The controller holds the nodes, but it does not hold their
+  endpoints, so it cannot hand out a topology.
+- **The interface.** The TUN crate opens the device, but nothing
+  configures it — the address, the route, and bringing it up all need
+  privileges the agent does not have yet.
 
-The Tailscale dialect is structurally complete — the framing, the
-handshake, the credential format — but its transcript hash is BLAKE3 where
-upstream uses BLAKE2s. A `tailscaled` peer will not complete the
-handshake. This is a bounded fix: switch the hash, and the `blake2`
-crate.
+So traffic does not route between nodes yet. Everything above is the
+control plane for a network that cannot yet carry traffic. A tenant would
+get a working management console and a working credential system for a
+mesh that does not pass packets.
+
+### No Tailscale interoperability, end to end
+
+The dialect now matches upstream exactly. The hash is BLAKE2s, the key
+schedule is HMAC-BLAKE2s, the transcript is a chain, and the handshake
+messages are framed exactly. The interoperability test replays a handshake
+captured from the Linux kernel's WireGuard implementation and reproduces
+the response that implementation accepted, byte for byte, including the
+authentication tag.
+
+What is not proven is a live session with a `tailscaled` peer: the control
+plane that `tailscaled` expects has not been stood up, so there is nothing
+to point it at. The protocol is the part that was open, and it is closed.
 
 ### No metering
 
@@ -140,7 +162,9 @@ out and stops the renewal.
 
 ## The order I would build the rest in
 
-1. **The data plane.** A TUN device and the forwarding path. Without it
+1. **The data plane.** The forwarding path is done. What is left is the
+   wiring: the controller assigns the overlay addresses and hands out the
+   topology, and the agent opens and configures the interface. Without it
    the product does not carry traffic, and everything else is a console
    around a mesh.
 2. **Metering.** Needed before the first shared tenant is billed, and
@@ -150,6 +174,6 @@ out and stops the renewal.
    already correct; it just needs something to finish it.
 4. **Pagination.** Needed before a tenant's node list is large enough to
    matter.
-5. **Tailscale interoperability.** A bounded change, and the point of the
-   compatibility work.
+5. **Tailscale interoperability.** The protocol is done; what is left is
+   the control plane a `tailscaled` peer can be pointed at.
 6. **Rate limiting, email, MFA.** Each is small on its own.

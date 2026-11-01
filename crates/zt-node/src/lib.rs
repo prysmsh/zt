@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+pub mod dataplane;
 pub mod dialect;
 
 use zt_crypto::error::Error;
@@ -47,6 +48,8 @@ pub enum NodeError {
     Io(std::io::Error),
     /// The requested peer is not known.
     UnknownPeer(SocketAddr),
+    /// A route or an address does not fit the networks this node is in.
+    InvalidRoute(String),
 }
 
 impl From<Error> for NodeError {
@@ -67,6 +70,7 @@ impl std::fmt::Display for NodeError {
             NodeError::Crypto(e) => write!(f, "protocol error: {e}"),
             NodeError::Io(e) => write!(f, "io error: {e}"),
             NodeError::UnknownPeer(a) => write!(f, "unknown peer: {a}"),
+            NodeError::InvalidRoute(reason) => write!(f, "invalid route: {reason}"),
         }
     }
 }

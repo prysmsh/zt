@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 zt-crypto.workspace = true
+zt-tun = { path = "../zt-tun" }
 rand.workspace = true
 rand_pq.workspace = true
 blake3.workspace = true

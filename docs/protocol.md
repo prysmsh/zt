@@ -151,9 +151,12 @@ one value both parties independently computed.
 
 - **Topology layer**: peer discovery, path selection, NAT traversal,
   relaying. The current implementation is a point-to-point session manager.
-- **Data plane**: the `zt-tun` crate opens a TUN device, but it is not yet
-  wired into `zt-node`, so `FRAME` packets carry application payloads
-  rather than IP traffic.
+- **Data plane**: the forwarding path exists — `zt-node`'s data plane reads
+  IP packets from the virtual interface, routes them to the peer that owns
+  the destination, and writes the frames the peers send back — but nothing
+  feeds it yet. The controller does not assign the overlay addresses the
+  routing depends on, and the node agent does not open the interface. See
+  [`docs/saas-readiness.md`](saas-readiness.md).
 - **ZeroTier compatibility (Track B)**: the oracle harness is in place but
   the legacy shim is not started.
 

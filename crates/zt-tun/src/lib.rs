@@ -49,7 +49,10 @@ impl IfReq {
         if bytes.is_empty() || bytes.len() >= IFNAMSIZ {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("the interface name must be 1 to {} characters", IFNAMSIZ - 1),
+                format!(
+                    "the interface name must be 1 to {} characters",
+                    IFNAMSIZ - 1
+                ),
             ));
         }
 
@@ -90,12 +93,7 @@ impl TunDevice {
         // SAFETY: `open` is called with a valid NUL-terminated path and the
         // flags are ordinary file flags. The returned descriptor is checked
         // for failure before it is used.
-        let raw = unsafe {
-            libc::open(
-                c"/dev/net/tun".as_ptr(),
-                libc::O_RDWR | libc::O_CLOEXEC,
-            )
-        };
+        let raw = unsafe { libc::open(c"/dev/net/tun".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
 
         if raw < 0 {
             return Err(io::Error::last_os_error());
@@ -204,13 +202,8 @@ impl TunDevice {
 
         // SAFETY: the descriptor is valid and open for writing, and the
         // buffer is a valid byte slice for its length.
-        let count = unsafe {
-            libc::write(
-                self.fd.as_raw_fd(),
-                packet.as_ptr().cast(),
-                packet.len(),
-            )
-        };
+        let count =
+            unsafe { libc::write(self.fd.as_raw_fd(), packet.as_ptr().cast(), packet.len()) };
 
         if count < 0 {
             return Err(io::Error::last_os_error());
@@ -223,6 +216,41 @@ impl TunDevice {
 impl AsRawFd for TunDevice {
     fn as_raw_fd(&self) -> std::os::fd::RawFd {
         self.fd.as_raw_fd()
+    }
+}
+
+/// A device that carries IP packets.
+///
+/// The data plane is written against this rather than against the device
+/// itself, so it can be exercised without a kernel interface and without
+/// privileges. A TUN device is one implementation; a queue is another.
+pub trait PacketDevice {
+    /// Read one packet from the device.
+    ///
+    /// The buffer holds a raw IP packet. Returns `WouldBlock` when no
+    /// packet is waiting.
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize>;
+
+    /// Write one packet to the device.
+    ///
+    /// The buffer holds a raw IP packet.
+    fn write(&mut self, packet: &[u8]) -> io::Result<usize>;
+
+    /// The maximum transmission unit.
+    fn mtu(&self) -> u16;
+}
+
+impl PacketDevice for TunDevice {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        TunDevice::read(self, buffer)
+    }
+
+    fn write(&mut self, packet: &[u8]) -> io::Result<usize> {
+        TunDevice::write(self, packet)
+    }
+
+    fn mtu(&self) -> u16 {
+        TunDevice::mtu(self)
     }
 }
 
