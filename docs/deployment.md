@@ -378,6 +378,21 @@ docker compose up -d
 
 Every node must then re-enroll.
 
+## Settle the admin endpoint before the provider's first start
+
+The provider seeds a **Cloud API** resource whose indicator is the admin
+endpoint's origin, and the admin console asks for that resource by
+indicator. If the admin endpoint moves after the database was seeded, the
+seeded resource keeps the old indicator and the console's request matches
+nothing: the console lists no tenants and says the operator's roles are
+wrong.
+
+So the admin endpoint has to be settled before the provider's first
+start. If the database was seeded earlier and the endpoint has since
+moved, `deploy/verity/grant-console-cloud-api.sql` puts the resource
+where the console expects it, links it to the console's application, and
+grants it to the admin tenant's `user` and `admin` roles.
+
 ## The tenant must be out of development mode
 
 A tenant that is in development mode says so in two places: the sign-in
