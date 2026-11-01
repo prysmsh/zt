@@ -12,6 +12,8 @@
 //! rather than in the API layer so that the CLI, the HTTP API, and any
 //! future RPC surface all inherit the same guarantee.
 
+use std::collections::HashSet;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -19,10 +21,11 @@ use tokio::sync::RwLock;
 use zt_crypto::credential::{ControllerIdentity, NodeCredential, NONCE_LEN};
 use zt_crypto::identity::{Address, Identity};
 
+use crate::address::{assign_address, Ipv4Range};
 use crate::error::{ControllerError, Result};
 use crate::model::{
-    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy,
-    Relay, RelayStatus,
+    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, Relay,
+    RelayStatus, Topology, TopologyPeer,
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
@@ -219,9 +222,7 @@ impl Controller {
     /// A suspended tenant's credentials are no longer renewed, so its access
     /// lapses within one credential TTL. Its data is retained so the tenant
     /// can be restored.
-    pub async fn suspend_tenant(&self, id: &str, reason: &str,
-        actor: &Actor,
-    ) -> Result<Tenant> {
+    pub async fn suspend_tenant(&self, id: &str, reason: &str, actor: &Actor) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -250,9 +251,7 @@ impl Controller {
     }
 
     /// Restore a suspended tenant.
-    pub async fn reactivate_tenant(&self, id: &str,
-        actor: &Actor,
-    ) -> Result<Tenant> {
+    pub async fn reactivate_tenant(&self, id: &str, actor: &Actor) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -280,9 +279,7 @@ impl Controller {
     ///
     /// The tenant's data is retained until a separate retention job purges
     /// it, so an accidental deletion can be reversed.
-    pub async fn delete_tenant(&self, id: &str,
-        actor: &Actor,
-    ) -> Result<Tenant> {
+    pub async fn delete_tenant(&self, id: &str, actor: &Actor) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -466,9 +463,7 @@ impl Controller {
     }
 
     /// Delete a network and everything scoped to it.
-    pub async fn delete_network(&self, tenant_id: &str, id: &str,
-        actor: &Actor,
-    ) -> Result<()> {
+    pub async fn delete_network(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<()> {
         let mut state = self.inner.state.write().await;
 
         // Verify ownership before removing anything. Removing first and
@@ -556,11 +551,7 @@ impl Controller {
     ///
     /// The principal is a node, identified by the subject the credential
     /// was issued for.
-    pub async fn find_node_for_principal(
-        &self,
-        tenant_id: &str,
-        subject: &str,
-    ) -> Result<Node> {
+    pub async fn find_node_for_principal(&self, tenant_id: &str, subject: &str) -> Result<Node> {
         self.inner
             .state
             .read()
@@ -570,6 +561,103 @@ impl Controller {
             .find(|node| node.tenant_id == tenant_id && node.id == subject)
             .cloned()
             .ok_or(ControllerError::NotFound("node"))
+    }
+
+    /// The lowest address in a network's range that no node holds.
+    ///
+    /// The address is what the data plane routes on, so it has to be unique
+    /// inside the network. A network with no room left is refused: the
+    /// operator has to widen the range or move a node.
+    fn assign_ipv4_address(
+        &self,
+        network: &crate::model::Network,
+        state: &crate::model::ControllerState,
+    ) -> Result<String> {
+        let range = Ipv4Range::parse(&network.cidr)?;
+
+        let used: HashSet<u32> = state
+            .nodes
+            .values()
+            .filter(|node| node.network_id == network.id)
+            .filter_map(|node| node.ipv4_address.parse::<Ipv4Addr>().ok())
+            .map(u32::from)
+            .collect();
+
+        assign_address(&range, &used).ok_or_else(|| {
+            ControllerError::Conflict(format!(
+                "the network {} has no free addresses left",
+                network.name
+            ))
+        })
+    }
+
+    /// The topology a node needs to carry traffic.
+    ///
+    /// A node is told its own address, the range it lives in, and the
+    /// peers it shares the range with. It is told nothing about any other
+    /// network or tenant.
+    pub async fn topology_for(&self, tenant_id: &str, node_id: &str) -> Result<Topology> {
+        let state = self.inner.state.read().await;
+
+        let node = state
+            .nodes
+            .get(node_id)
+            .filter(|node| node.tenant_id == tenant_id)
+            .cloned()
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        let network = state
+            .networks
+            .get(&node.network_id)
+            .cloned()
+            .ok_or(ControllerError::NotFound("network"))?;
+
+        let peers = state
+            .nodes
+            .values()
+            .filter(|peer| peer.tenant_id == tenant_id)
+            .filter(|peer| peer.network_id == node.network_id)
+            .filter(|peer| peer.id != node.id)
+            .map(|peer| TopologyPeer {
+                address: peer.ipv4_address.clone(),
+                public_key: peer.public_key.clone(),
+                endpoint: peer.endpoint.clone(),
+            })
+            .collect();
+
+        Ok(Topology {
+            address: node.ipv4_address,
+            cidr: network.cidr,
+            network_id: network.network_id,
+            peers,
+        })
+    }
+
+    /// Record the endpoint a node reaches its peers at.
+    ///
+    /// The node reports it, because only the node knows it: it may be
+    /// behind a NAT, and the address it listens on is not the address its
+    /// peers see.
+    pub async fn set_node_endpoint(
+        &self,
+        tenant_id: &str,
+        node_id: &str,
+        endpoint: &str,
+    ) -> Result<Node> {
+        let mut state = self.inner.state.write().await;
+
+        let node = state
+            .nodes
+            .get_mut(node_id)
+            .filter(|node| node.tenant_id == tenant_id)
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        node.endpoint = Some(endpoint.to_string());
+        node.last_seen = Some(now_unix());
+
+        let node = node.clone();
+        self.persist(&state).await?;
+        Ok(node)
     }
 
     /// Enroll a node for a tenant and issue its first credential.
@@ -606,6 +694,7 @@ impl Controller {
         }
 
         let address = Address::derive(network.network_id, &public_key);
+        let ipv4_address = self.assign_ipv4_address(&network, &state)?;
         let fingerprint = fingerprint(&public_key);
         let issued_at = now_unix();
         let mut nonce = [0u8; NONCE_LEN];
@@ -629,6 +718,8 @@ impl Controller {
             network_id: network.id.clone(),
             name,
             address: address.to_hex(),
+            ipv4_address,
+            endpoint: None,
             public_key: hex::encode(public_key),
             fingerprint,
             tags,
@@ -655,9 +746,7 @@ impl Controller {
     }
 
     /// Revoke a node and refuse future renewal.
-    pub async fn revoke_node(&self, tenant_id: &str, id: &str,
-        actor: &Actor,
-    ) -> Result<Node> {
+    pub async fn revoke_node(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<Node> {
         let mut state = self.inner.state.write().await;
         let node = state
             .nodes
@@ -765,7 +854,10 @@ impl Controller {
     }
 
     /// Create a policy for a tenant.
-    pub async fn create_policy(&self, tenant_id: &str, policy: Policy,
+    pub async fn create_policy(
+        &self,
+        tenant_id: &str,
+        policy: Policy,
         actor: &Actor,
     ) -> Result<Policy> {
         self.check_tenant_limits(tenant_id, 0, 0, 1, 0).await?;
@@ -799,9 +891,7 @@ impl Controller {
     }
 
     /// Delete a policy.
-    pub async fn delete_policy(&self, tenant_id: &str, id: &str,
-        actor: &Actor,
-    ) -> Result<()> {
+    pub async fn delete_policy(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<()> {
         let mut state = self.inner.state.write().await;
 
         // Verify ownership before removing anything.
@@ -848,7 +938,10 @@ impl Controller {
     }
 
     /// Create a relay for a tenant.
-    pub async fn create_relay(&self, tenant_id: &str, relay: Relay,
+    pub async fn create_relay(
+        &self,
+        tenant_id: &str,
+        relay: Relay,
         actor: &Actor,
     ) -> Result<Relay> {
         self.check_tenant_limits(tenant_id, 0, 0, 0, 1).await?;
@@ -885,9 +978,7 @@ impl Controller {
     }
 
     /// Drain a relay before maintenance or shutdown.
-    pub async fn drain_relay(&self, tenant_id: &str, id: &str,
-        actor: &Actor,
-    ) -> Result<Relay> {
+    pub async fn drain_relay(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<Relay> {
         let mut state = self.inner.state.write().await;
         let relay = state
             .relays

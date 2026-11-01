@@ -118,8 +118,11 @@ pub async fn require_auth(
         return next.run(request).await;
     }
 
-    let Some(token) = bearer_token(headers.get("authorization").and_then(|value| value.to_str().ok()))
-    else {
+    let Some(token) = bearer_token(
+        headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok()),
+    ) else {
         return AuthRejection::from(AuthError::Missing).into_response();
     };
 
@@ -135,7 +138,11 @@ pub async fn require_auth(
                 name: claims.name.clone(),
                 preferred_username: claims.preferred_username.clone(),
                 tenant_id: claims.tenant_id.clone(),
-                scopes: claims.scopes().iter().map(|scope| scope.to_string()).collect(),
+                scopes: claims
+                    .scopes()
+                    .iter()
+                    .map(|scope| scope.to_string())
+                    .collect(),
                 roles: claims.roles().iter().map(|role| role.to_string()).collect(),
             },
             Err(error) => return AuthRejection::from(error).into_response(),

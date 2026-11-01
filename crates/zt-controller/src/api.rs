@@ -25,8 +25,8 @@ use serde_json::json;
 
 use crate::error::ControllerError;
 use crate::middleware::{require_auth, AuthState};
+use crate::model::{Network, Node, Policy, Relay, Selector, Topology};
 use crate::principal::Principal;
-use crate::model::{Network, Node, Policy, Relay, Selector};
 use crate::service::{ControlPlaneHealth, Controller};
 use crate::tenant::{Deployment, Tenant, TenantLimits};
 
@@ -46,10 +46,7 @@ pub fn router(controller: Controller) -> Router {
 /// token to name the tenant in the path, and the master console requires
 /// the operator role.
 pub fn router_with_auth(controller: Controller, auth: AuthState) -> Router {
-    build_router(controller).layer(axum::middleware::from_fn_with_state(
-        auth,
-        require_auth,
-    ))
+    build_router(controller).layer(axum::middleware::from_fn_with_state(auth, require_auth))
 }
 
 /// The routes, without the auth layer.
@@ -83,6 +80,14 @@ fn build_router(controller: Controller) -> Router {
         // A node asks who it is, using the credential it was issued. This
         // is how a node learns its own identity without being told.
         .route("/api/v1/t/{tenant}/nodes/self", get(get_self))
+        // The topology a node needs to carry traffic: its own address, the
+        // range it lives in, and the peers it shares the range with.
+        .route("/api/v1/t/{tenant}/topology", get(get_topology))
+        // A node reports the endpoint its peers reach it at.
+        .route(
+            "/api/v1/t/{tenant}/nodes/self/endpoint",
+            post(report_endpoint),
+        )
         .route(
             "/api/v1/t/{tenant}/nodes/{id}/credential",
             post(renew_credential),
@@ -227,7 +232,11 @@ async fn suspend_tenant(
     Path(id): Path<String>,
     Json(request): Json<SuspendTenantRequest>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.suspend_tenant(&id, &request.reason, &principal.actor()).await?))
+    Ok(Json(
+        controller
+            .suspend_tenant(&id, &request.reason, &principal.actor())
+            .await?,
+    ))
 }
 
 async fn reactivate_tenant(
@@ -235,7 +244,11 @@ async fn reactivate_tenant(
     principal: Principal,
     Path(id): Path<String>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.reactivate_tenant(&id, &principal.actor()).await?))
+    Ok(Json(
+        controller
+            .reactivate_tenant(&id, &principal.actor())
+            .await?,
+    ))
 }
 
 async fn delete_tenant(
@@ -243,7 +256,9 @@ async fn delete_tenant(
     principal: Principal,
     Path(id): Path<String>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.delete_tenant(&id, &principal.actor()).await?))
+    Ok(Json(
+        controller.delete_tenant(&id, &principal.actor()).await?,
+    ))
 }
 
 #[derive(Debug, Serialize)]
@@ -333,7 +348,9 @@ async fn delete_network(
     principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<StatusCode, ControllerError> {
-    controller.delete_network(&tenant, &id, &principal.actor()).await?;
+    controller
+        .delete_network(&tenant, &id, &principal.actor())
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -377,7 +394,7 @@ async fn enroll_node(
     State(controller): State<Controller>,
     principal: Principal,
     Path(tenant): Path<String>,
- Json(request): Json<EnrollNodeRequest>,
+    Json(request): Json<EnrollNodeRequest>,
 ) -> Result<(StatusCode, Json<EnrollNodeResponse>), ControllerError> {
     let bytes = hex::decode(&request.public_key)
         .map_err(|_| ControllerError::InvalidRequest("public_key must be hex encoded".into()))?;
@@ -427,12 +444,49 @@ async fn get_self(
     Ok(Json(node))
 }
 
+async fn get_topology(
+    State(controller): State<Controller>,
+    Path(tenant): Path<String>,
+    principal: Principal,
+) -> Result<Json<Topology>, ControllerError> {
+    // The subject of a node's credential is the node's identifier, so the
+    // node is found by that subject. A node only ever sees its own
+    // network.
+    let topology = controller
+        .topology_for(&tenant, principal.subject())
+        .await?;
+    Ok(Json(topology))
+}
+
+#[derive(Debug, Deserialize)]
+struct EndpointRequest {
+    endpoint: String,
+}
+
+async fn report_endpoint(
+    State(controller): State<Controller>,
+    Path(tenant): Path<String>,
+    principal: Principal,
+    Json(request): Json<EndpointRequest>,
+) -> Result<Json<Node>, ControllerError> {
+    // A node may only report its own endpoint. The subject of its
+    // credential is its identifier, so there is no path to tamper with.
+    let node = controller
+        .set_node_endpoint(&tenant, principal.subject(), &request.endpoint)
+        .await?;
+    Ok(Json(node))
+}
+
 async fn revoke_node(
     State(controller): State<Controller>,
     principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<Node>, ControllerError> {
-    Ok(Json(controller.revoke_node(&tenant, &id, &principal.actor()).await?))
+    Ok(Json(
+        controller
+            .revoke_node(&tenant, &id, &principal.actor())
+            .await?,
+    ))
 }
 
 #[derive(Debug, Serialize)]
@@ -447,7 +501,9 @@ async fn renew_credential(
     principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<CredentialResponse>, ControllerError> {
-    let (node, credential) = controller.renew_node_credential(&tenant, &id, &principal.actor()).await?;
+    let (node, credential) = controller
+        .renew_node_credential(&tenant, &id, &principal.actor())
+        .await?;
     Ok(Json(CredentialResponse {
         node,
         credential: hex::encode(credential.serialize()),
@@ -525,7 +581,9 @@ async fn delete_policy(
     principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<StatusCode, ControllerError> {
-    controller.delete_policy(&tenant, &id, &principal.actor()).await?;
+    controller
+        .delete_policy(&tenant, &id, &principal.actor())
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -587,7 +645,11 @@ async fn drain_relay(
     principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<Relay>, ControllerError> {
-    Ok(Json(controller.drain_relay(&tenant, &id, &principal.actor()).await?))
+    Ok(Json(
+        controller
+            .drain_relay(&tenant, &id, &principal.actor())
+            .await?,
+    ))
 }
 
 async fn list_events(

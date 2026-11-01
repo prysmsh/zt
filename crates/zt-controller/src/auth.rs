@@ -219,11 +219,9 @@ impl Verifier {
             None => {
                 self.refresh().await?;
                 let keys = self.keys.read().await;
-                keys.get(&kid)
-                    .cloned()
-                    .ok_or_else(|| {
-                        AuthError::Invalid("the token was signed with an unknown key".into())
-                    })?
+                keys.get(&kid).cloned().ok_or_else(|| {
+                    AuthError::Invalid("the token was signed with an unknown key".into())
+                })?
             }
         };
 
@@ -252,7 +250,9 @@ impl Verifier {
             .get(&self.config.jwks_uri)
             .send()
             .await
-            .map_err(|error| AuthError::Invalid(format!("could not reach the provider: {error}")))?;
+            .map_err(|error| {
+                AuthError::Invalid(format!("could not reach the provider: {error}"))
+            })?;
 
         let document: Jwks = response
             .json()
@@ -276,16 +276,12 @@ impl Verifier {
                         continue;
                     };
                     match jwk.crv.as_deref() {
-                        Some("P-256") => DecodingKey::from_ec_components(
-                            &unpadded(x),
-                            &unpadded(y),
-                        )
-                        .ok(),
-                        Some("P-384") => DecodingKey::from_ec_components(
-                            &unpadded(x),
-                            &unpadded(y),
-                        )
-                        .ok(),
+                        Some("P-256") => {
+                            DecodingKey::from_ec_components(&unpadded(x), &unpadded(y)).ok()
+                        }
+                        Some("P-384") => {
+                            DecodingKey::from_ec_components(&unpadded(x), &unpadded(y)).ok()
+                        }
                         _ => None,
                     }
                 }

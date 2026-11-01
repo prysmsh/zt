@@ -12,13 +12,14 @@
 //!   expires within one credential TTL.
 //! - Every administrative mutation is written to an append-only audit log.
 
+pub mod address;
 pub mod api;
 pub mod auth;
 pub mod error;
 pub mod identity;
 pub mod middleware;
-pub mod principal;
 pub mod model;
+pub mod principal;
 pub mod service;
 pub mod store;
 pub mod tenant;
@@ -26,13 +27,13 @@ pub mod tenant;
 pub use api::{router, router_with_auth};
 pub use auth::{AuthConfig, Verifier};
 pub use error::{ControllerError, Result};
-pub use middleware::AuthState;
-pub use principal::Principal;
 pub use identity::IdentityStore;
+pub use middleware::AuthState;
 pub use model::{
     Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, PortSpec,
     Protocol, Relay, RelayStatus, Selector,
 };
+pub use principal::Principal;
 pub use service::{Controller, SharedController, DEFAULT_CREDENTIAL_TTL_SECS};
 pub use store::{MemoryStore, SqliteStore, Store};
 pub use tenant::{Deployment, Tenant, TenantLimits, TenantStatus, TenantUsage};

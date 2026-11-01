@@ -119,6 +119,8 @@ impl SqliteStore {
                 network_id TEXT NOT NULL REFERENCES networks(id) ON DELETE CASCADE,
                 name TEXT NOT NULL,
                 address TEXT NOT NULL,
+                ipv4_address TEXT NOT NULL DEFAULT '',
+                endpoint TEXT,
                 public_key TEXT NOT NULL,
                 fingerprint TEXT NOT NULL,
                 tags TEXT NOT NULL DEFAULT '[]',
@@ -181,6 +183,21 @@ impl SqliteStore {
             "#,
         )?;
 
+        // An existing database was created before the node carried an IPv4
+        // address or an endpoint. SQLite has no ADD COLUMN IF NOT EXISTS,
+        // so the columns are checked first.
+        for (column, definition) in [
+            ("ipv4_address", "TEXT NOT NULL DEFAULT ''"),
+            ("endpoint", "TEXT"),
+        ] {
+            if !self.column_exists(&connection, "nodes", column) {
+                connection.execute(
+                    &format!("ALTER TABLE nodes ADD COLUMN {column} {definition}"),
+                    [],
+                )?;
+            }
+        }
+
         let version: Option<i64> = connection
             .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
                 row.get(0)
@@ -190,6 +207,20 @@ impl SqliteStore {
             connection.execute("INSERT INTO schema_version(version) VALUES (1)", [])?;
         }
         Ok(())
+    }
+
+    /// Whether a table has a column.
+    fn column_exists(&self, connection: &Connection, table: &str, column: &str) -> bool {
+        let mut statement = match connection.prepare(&format!("PRAGMA table_info({table})")) {
+            Ok(statement) => statement,
+            Err(_) => return false,
+        };
+
+        let rows = statement.query_map([], |row| row.get::<_, String>(1));
+        match rows {
+            Ok(rows) => rows.flatten().any(|name| name == column),
+            Err(_) => false,
+        }
     }
 
     fn load_tenants(&self, connection: &Connection) -> Result<Vec<crate::tenant::Tenant>> {
@@ -249,32 +280,35 @@ impl SqliteStore {
 
     fn load_nodes(&self, connection: &Connection) -> Result<Vec<Node>> {
         let mut statement = connection.prepare(
-            "SELECT id, tenant_id, network_id, name, address, public_key, fingerprint, tags,
+            "SELECT id, tenant_id, network_id, name, address, ipv4_address, endpoint,
+                    public_key, fingerprint, tags,
                     platform, version, status, credential_issued_at, credential_not_after,
                     last_seen, created_at
              FROM nodes ORDER BY created_at, id",
         )?;
         let rows = statement
             .query_map([], |row| {
-                let tags_json: String = row.get(7)?;
+                let tags_json: String = row.get(9)?;
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                let status: String = row.get(10)?;
+                let status: String = row.get(12)?;
                 Ok(Node {
                     id: row.get(0)?,
                     tenant_id: row.get(1)?,
                     network_id: row.get(2)?,
                     name: row.get(3)?,
                     address: row.get(4)?,
-                    public_key: row.get(5)?,
-                    fingerprint: row.get(6)?,
+                    ipv4_address: row.get(5)?,
+                    endpoint: row.get(6)?,
+                    public_key: row.get(7)?,
+                    fingerprint: row.get(8)?,
                     tags,
-                    platform: row.get(8)?,
-                    version: row.get(9)?,
+                    platform: row.get(10)?,
+                    version: row.get(11)?,
                     status: parse_node_status(&status),
-                    credential_issued_at: row.get::<_, i64>(11)? as u64,
-                    credential_not_after: row.get::<_, i64>(12)? as u64,
-                    last_seen: row.get::<_, Option<i64>>(13)?.map(|value| value as u64),
-                    created_at: row.get::<_, i64>(14)? as u64,
+                    credential_issued_at: row.get::<_, i64>(13)? as u64,
+                    credential_not_after: row.get::<_, i64>(14)? as u64,
+                    last_seen: row.get::<_, Option<i64>>(15)?.map(|value| value as u64),
+                    created_at: row.get::<_, i64>(16)? as u64,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -455,16 +489,20 @@ impl Store for SqliteStore {
 
         for node in state.nodes.values() {
             transaction.execute(
-                "INSERT INTO nodes(id, tenant_id, network_id, name, address, public_key,
-                                   fingerprint, tags, platform, version, status,
-                                   credential_issued_at, credential_not_after, last_seen, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                "INSERT INTO nodes(id, tenant_id, network_id, name, address, ipv4_address,
+                                   endpoint, public_key, fingerprint, tags, platform, version,
+                                   status, credential_issued_at, credential_not_after,
+                                   last_seen, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                         ?16, ?17)",
                 params![
                     node.id,
                     node.tenant_id,
                     node.network_id,
                     node.name,
                     node.address,
+                    node.ipv4_address,
+                    node.endpoint,
                     node.public_key,
                     node.fingerprint,
                     serde_json::to_string(&node.tags).unwrap_or_else(|_| "[]".into()),

@@ -54,6 +54,14 @@ pub struct Node {
     pub name: String,
     /// Per-network address rendered as lowercase hex.
     pub address: String,
+    /// The IPv4 address in the network's range, assigned when the node
+    /// enrols.
+    ///
+    /// The protocol address is an identifier; this one is an address the
+    /// data plane routes on.
+    pub ipv4_address: String,
+    /// The node's UDP endpoint, as the node last reported it.
+    pub endpoint: Option<String>,
     /// Ed25519 public key of the node, hex encoded.
     pub public_key: String,
     /// Fingerprint shown to operators.
@@ -80,6 +88,30 @@ pub enum NodeStatus {
     Degraded,
     Offline,
     Revoked,
+}
+
+/// What a node needs to carry traffic.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Topology {
+    /// The node's own address in the network's range.
+    pub address: String,
+    /// The network's range, in the `10.88.0.0/24` form.
+    pub cidr: String,
+    /// The network's numeric identifier.
+    pub network_id: u64,
+    /// The peers in the same network.
+    pub peers: Vec<TopologyPeer>,
+}
+
+/// A peer in the topology.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TopologyPeer {
+    /// The peer's address in the network's range.
+    pub address: String,
+    /// The peer's Ed25519 public key, hex encoded.
+    pub public_key: String,
+    /// The peer's UDP endpoint, when it has reported one.
+    pub endpoint: Option<String>,
 }
 
 /// A default-deny access rule.
