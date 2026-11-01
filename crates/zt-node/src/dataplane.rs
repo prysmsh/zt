@@ -283,6 +283,10 @@ pub struct DataPlane {
     local: HashMap<Ipv4Addr, ()>,
     /// What the node has carried since the last count was taken.
     usage: Usage,
+    /// Whether the node forwards packets between other hosts.
+    relaying: bool,
+    /// The peer that relays for this node, when it has one.
+    relay: Option<SocketAddr>,
 }
 
 impl DataPlane {
@@ -293,7 +297,24 @@ impl DataPlane {
             routes: RouteTable::new(),
             local: HashMap::new(),
             usage: Usage::default(),
+            relaying: false,
+            relay: None,
         }
+    }
+
+    /// Mark the node as forwarding packets between other hosts.
+    pub fn set_relaying(&mut self, relaying: bool) {
+        self.relaying = relaying;
+    }
+
+    /// Name the peer that relays for this node.
+    pub fn set_relay(&mut self, relay: SocketAddr) {
+        self.relay = Some(relay);
+    }
+
+    /// The peer that relays for this node.
+    pub fn relay(&self) -> Option<SocketAddr> {
+        self.relay
     }
 
     /// The maximum transmission unit of the device.
@@ -369,6 +390,10 @@ impl DataPlane {
     /// Returns how many packets were forwarded. A packet with a destination
     /// this node does not know is dropped: the kernel may have routes the
     /// overlay does not, and the overlay is not a gateway.
+    ///
+    /// When the peer that owns the destination has no session with this
+    /// node, the packet goes to the relay instead. The relay knows where
+    /// that peer is, and forwards it.
     pub fn forward_outbound(&mut self, node: &mut Node) -> Result<usize> {
         let mut buffer = vec![0u8; self.device.mtu() as usize];
         let mut forwarded = 0;
@@ -384,16 +409,23 @@ impl DataPlane {
                 continue;
             };
 
-            let Some(peer) = self.routes.lookup(header.destination) else {
-                continue;
+            // The peer that owns the destination, or the relay to reach it
+            // through when the peer is out of reach.
+            let routed = self.routes.lookup(header.destination);
+            let relay = self.relay;
+
+            // A peer this node has a session with is reached directly. One
+            // it does not is reached through the relay, which knows where
+            // that peer is and forwards the packet itself.
+            let reachable = routed.is_some() && node.is_connected(routed.as_ref().unwrap());
+            let target = match (reachable, relay, routed) {
+                (true, _, Some(peer)) => peer,
+                (false, Some(relay), _) => relay,
+                _ => continue,
             };
 
-            // The peer may not have a session yet. The packet is dropped
-            // rather than queued: the topology layer is what establishes
-            // sessions, and it has no way to know a packet is worth
-            // keeping.
             let packet = Packet::new(TYPE_FRAME, buffer[..count].to_vec());
-            if node.send(peer, &packet).is_err() {
+            if node.send(target, &packet).is_err() {
                 continue;
             }
 
@@ -405,12 +437,25 @@ impl DataPlane {
         Ok(forwarded)
     }
 
-    /// Write the frames a peer sent to the device.
+    /// Handle the frames a peer sent.
     ///
-    /// A frame is only written when it is addressed to this node and it
-    /// came from the peer that owns the source address. Anything else is
-    /// dropped: a node is not a relay for packets it did not ask for.
-    pub fn forward_inbound(&mut self, from: SocketAddr, frames: &[Packet]) -> Result<usize> {
+    /// A frame addressed to this node is written to the device. A frame
+    /// addressed to another host is forwarded to the peer that owns it,
+    /// but only when this node is a relay: a host that forwards would be
+    /// an open relay, and the mesh has relays for that.
+    ///
+    /// A frame is only accepted when it came from the peer that owns its
+    /// source address, so a peer cannot claim to be anyone. The one
+    /// exception is a frame that arrived through this node's own relay:
+    /// the relay authenticated the sender before it forwarded, so the
+    /// relay's word on the source is the same word the node would get by
+    /// talking to that sender itself.
+    pub fn forward_inbound(
+        &mut self,
+        node: &mut Node,
+        from: SocketAddr,
+        frames: &[Packet],
+    ) -> Result<usize> {
         let mut written = 0;
 
         for frame in frames {
@@ -422,26 +467,57 @@ impl DataPlane {
                 continue;
             };
 
-            if !self.is_local(header.destination) {
+            // The source has to be the address of the peer that sent it,
+            // or a peer could claim to be anyone. A frame that came
+            // through the relay carries the original sender, which the
+            // relay authenticated, so the relay's endpoint stands in for
+            // the sender here.
+            let trusted_source = match self.routes.address_of(from) {
+                Some(address) => address == header.source,
+                None => self.relay == Some(from),
+            };
+
+            if std::env::var("ZT_DEBUG").is_ok() {
+                eprintln!(
+                    "[plane] from {from} dest {} src {} local {} trusted {} relaying {}",
+                    header.destination,
+                    header.source,
+                    self.is_local(header.destination),
+                    trusted_source,
+                    self.relaying
+                );
+            }
+
+            if !trusted_source {
                 continue;
             }
 
-            // The source has to be the address of the peer that sent it,
-            // or a peer could claim to be anyone.
-            let Some(source) = self.routes.address_of(from) else {
+            if self.is_local(header.destination) {
+                if self.device.write(&frame.payload).is_ok() {
+                    self.usage.bytes_in += frame.payload.len() as u64;
+                    self.usage.packets_in += 1;
+                    written += 1;
+                }
+                continue;
+            }
+
+            // A relay passes the frame on to the peer that owns the
+            // destination. A host does not: the mesh has relays for that.
+            if !self.relaying {
+                continue;
+            }
+
+            let Some(peer) = self.routes.lookup(header.destination) else {
                 continue;
             };
 
-            if source != header.source {
+            self.usage.bytes_out += frame.payload.len() as u64;
+            self.usage.packets_out += 1;
+
+            if node.send(peer, &frame.clone()).is_err() {
                 continue;
             }
 
-            if self.device.write(&frame.payload).is_err() {
-                continue;
-            }
-
-            self.usage.bytes_in += frame.payload.len() as u64;
-            self.usage.packets_in += 1;
             written += 1;
         }
 
@@ -616,7 +692,7 @@ mod tests {
             TYPE_FRAME,
             ipv4(Ipv4Addr::new(10, 88, 0, 2), Ipv4Addr::new(10, 88, 0, 9)),
         );
-        let count = plane.forward_inbound(peer, &[frame]).unwrap();
+        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
         assert_eq!(count, 0, "the frame should not have been written");
         assert!(written.lock().unwrap().is_empty());
     }
@@ -641,7 +717,7 @@ mod tests {
             TYPE_FRAME,
             ipv4(Ipv4Addr::new(10, 88, 0, 3), Ipv4Addr::new(10, 88, 0, 1)),
         );
-        let count = plane.forward_inbound(peer, &[frame]).unwrap();
+        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
         assert_eq!(count, 0, "the frame should not have been written");
         assert!(written.lock().unwrap().is_empty());
     }
@@ -660,7 +736,7 @@ mod tests {
 
         let packet = ipv4(Ipv4Addr::new(10, 88, 0, 2), Ipv4Addr::new(10, 88, 0, 1));
         let frame = Packet::new(TYPE_FRAME, packet.clone());
-        let count = plane.forward_inbound(peer, &[frame]).unwrap();
+        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
         assert_eq!(count, 1);
 
         assert_eq!(*written.lock().unwrap(), vec![packet]);

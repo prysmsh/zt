@@ -70,6 +70,13 @@ pub struct Node {
     /// checks the peer's post-quantum key, so a topology without it cannot
     /// reach the peer.
     pub pq_public_key: String,
+    /// Whether the node forwards packets between the others.
+    ///
+    /// A host behind a NAT cannot be reached directly, so the mesh has
+    /// relays that sit on public addresses and carry the traffic between
+    /// hosts that cannot reach each other.
+    #[serde(default)]
+    pub relay: bool,
     /// Fingerprint shown to operators.
     pub fingerprint: String,
     #[serde(default)]

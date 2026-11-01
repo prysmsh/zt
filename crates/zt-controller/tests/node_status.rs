@@ -140,6 +140,7 @@ async fn a_node_that_reports_its_presence_is_online() {
             &node.id,
             "198.51.100.7:9994",
             "",
+            false,
             Default::default(),
         )
         .await
@@ -160,6 +161,7 @@ async fn a_node_that_has_gone_quiet_is_offline() {
             &node.id,
             "198.51.100.7:9994",
             "",
+            false,
             Default::default(),
         )
         .await
@@ -187,6 +189,7 @@ async fn a_revoked_node_stays_revoked_however_recently_it_was_seen() {
             &node.id,
             "198.51.100.7:9994",
             "",
+            false,
             Default::default(),
         )
         .await
@@ -277,6 +280,7 @@ async fn the_api_reports_the_same_status() {
             &node.id,
             "198.51.100.7:9994",
             "",
+            false,
             Default::default(),
         )
         .await

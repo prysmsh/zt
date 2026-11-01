@@ -525,6 +525,9 @@ struct PresenceRequest {
     /// What the node carried since it last reported.
     #[serde(default)]
     usage: UsageRequest,
+    /// Whether the node forwards packets between the others.
+    #[serde(default)]
+    relay: bool,
 }
 
 /// What a node carried since it last reported.
@@ -552,6 +555,7 @@ async fn report_presence(
             principal.subject(),
             &request.endpoint,
             &request.pq_public_key,
+            request.relay,
             NodeUsage {
                 bytes_in: request.usage.bytes_in,
                 bytes_out: request.usage.bytes_out,

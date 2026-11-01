@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use zt_crypto::handshake_flow::{PeerStatic, StaticIdentity};
 use zt_crypto::identity::Identity;
+use zt_crypto::membership::{ControllerTrust, Membership};
 use zt_crypto::packet::{Packet, TYPE_FRAME};
 use zt_crypto::pq::{KemSuite, SigSuite};
 use zt_node::dataplane::DataPlane;
@@ -133,7 +134,9 @@ impl TestNode {
             while !stop_c.load(Ordering::Relaxed) {
                 if let Ok((count, from)) = node.socket_mut().recv_from(&mut buffer) {
                     if let Ok(packets) = node.handle_datagram(&buffer[..count], from) {
-                        plane.forward_inbound(from, &packets).expect("forward");
+                        plane
+                            .forward_inbound(&mut node, from, &packets)
+                            .expect("forward");
                     }
                 }
 
@@ -194,6 +197,11 @@ struct DirectNode {
 
 impl DirectNode {
     fn start() -> DirectNode {
+        Self::with_address(CLIENT_ADDRESS)
+    }
+
+    /// Start a node that holds the given address.
+    fn with_address(address: Ipv4Addr) -> DirectNode {
         let identity = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
         let socket = UdpSocket::bind("127.0.0.1:0").expect("bind");
         socket
@@ -212,7 +220,7 @@ impl DirectNode {
             mtu: 1400,
         }));
         plane.add_network_str(NETWORK).expect("network");
-        plane.add_local_address(CLIENT_ADDRESS).expect("address");
+        plane.add_local_address(address).expect("address");
 
         DirectNode { node, plane, queue }
     }
@@ -249,7 +257,13 @@ impl DirectNode {
         self.queue.written.lock().unwrap().clone()
     }
 
-    /// Read whatever is waiting on the socket and hand it to the plane.
+    /// Read whatever is waiting on the socket and hand it to the plane,
+    /// and send whatever the device is holding.
+    /// How many packets the device has handed out.
+    fn handed_out(&self) -> usize {
+        self.queue.outbound.lock().unwrap().len()
+    }
+
     fn poll(&mut self) {
         let mut buffer = [0u8; 65536];
 
@@ -258,9 +272,140 @@ impl DirectNode {
                 continue;
             };
 
-            self.plane.forward_inbound(from, &packets).expect("forward");
+            self.plane
+                .forward_inbound(&mut self.node, from, &packets)
+                .expect("forward");
+        }
+
+        self.plane.forward_outbound(&mut self.node).expect("outbound");
+    }
+}
+
+/// The address the relay holds.
+/// The address the relay holds.
+const RELAY_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 88, 0, 9);
+
+/// Start a relay node: it forwards between the hosts and has no interface
+/// of its own.
+struct RelayNode {
+    addr: SocketAddr,
+    peer_static: PeerStatic,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl RelayNode {
+    /// Start a relay that knows the two hosts.
+    fn start(hosts: &[(SocketAddr, Ipv4Addr)], address: Ipv4Addr) -> RelayNode {
+        let identity = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let peer_static = PeerStatic {
+            ed25519: identity.public_key(),
+            ml_dsa: identity.pq_public_key(),
+        };
+
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_c = stop.clone();
+
+        let hosts = hosts.to_vec();
+        let handle = thread::spawn(move || {
+            let mut node = Node::from_socket(socket, identity).unwrap();
+            node.set_suites(KemSuite::HybridX25519MlKem768, SigSuite::HybridEd25519MlDsa65);
+            node.set_membership(Membership::new());
+            node.set_trust(ControllerTrust::new());
+
+            let mut plane = DataPlane::new(Box::new(zt_tun::NullDevice));
+            plane.set_relaying(true);
+            plane.add_network_str(NETWORK).unwrap();
+            plane.add_local_address(address).unwrap();
+
+            for (endpoint, address) in &hosts {
+                plane.set_route(*address, *endpoint).unwrap();
+            }
+
+            let mut buffer = [0u8; 65536];
+            while !stop_c.load(Ordering::Relaxed) {
+                if let Ok((count, from)) = node.socket_mut().recv_from(&mut buffer) {
+                    if let Ok(packets) = node.handle_datagram(&buffer[..count], from) {
+                        plane.forward_inbound(&mut node, from, &packets).unwrap();
+                    }
+                }
+                let _ = plane.forward_outbound(&mut node);
+            }
+        });
+
+        RelayNode {
+            addr,
+            peer_static,
+            stop,
+            handle: Some(handle),
         }
     }
+}
+
+impl Drop for RelayNode {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Start the two hosts, the relay between them, and complete the
+/// handshakes.
+fn relayed_pair() -> (RelayNode, DirectNode, DirectNode) {
+    let mut a = DirectNode::with_address(CLIENT_ADDRESS);
+    let mut b = DirectNode::with_address(SERVER_ADDRESS);
+    let a_addr = a.node.local_addr();
+    let b_addr = b.node.local_addr();
+
+    // The relay holds its own address, so it is not one of the hosts.
+    let relay = RelayNode::start(&[(a_addr, CLIENT_ADDRESS), (b_addr, SERVER_ADDRESS)], RELAY_ADDRESS);
+
+    // Both hosts know the relay, and handshake with it.
+    a.plane.set_relay(relay.addr);
+    b.plane.set_relay(relay.addr);
+
+    a.connect(relay.addr, relay.peer_static.clone());
+    b.connect(relay.addr, relay.peer_static.clone());
+
+    (relay, a, b)
+}
+
+#[test]
+fn a_packet_between_two_hosts_goes_through_the_relay() {
+    let (_relay, mut a, mut b) = relayed_pair();
+
+    // The first host sends a packet for the second, which it cannot reach
+    // directly: it has no route to it, only a relay.
+    let payload = b"through the relay";
+    a.queue_packet(ipv4(CLIENT_ADDRESS, SERVER_ADDRESS, payload));
+
+    let deadline = Instant::now() + TIMEOUT;
+    while Instant::now() < deadline && b.written().is_empty() {
+        a.poll();
+        b.poll();
+
+        eprintln!(
+            "[debug] a handed out {}, b written {}",
+            a.handed_out(),
+            b.written().len()
+        );
+
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let written = b.written();
+    assert_eq!(written.len(), 1, "the second host's device was not written to");
+    assert_eq!(
+        written[0],
+        ipv4(CLIENT_ADDRESS, SERVER_ADDRESS, payload),
+        "the packet arrived altered"
+    );
 }
 
 /// Start the two nodes and complete the handshake between them.

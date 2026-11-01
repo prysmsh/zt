@@ -707,11 +707,26 @@ impl Controller {
             .cloned()
             .ok_or(ControllerError::NotFound("network"))?;
 
-        let peers = state
-            .nodes
-            .values()
-            .filter(|peer| peer.tenant_id == tenant_id)
-            .filter(|peer| peer.network_id == node.network_id)
+        // A relay has to know every host in its networks, because a host
+        // may ask it to reach any of them. A host is handed the others it
+        // might talk to.
+        let reachable: Vec<&crate::model::Node> = if node.relay {
+            state
+                .nodes
+                .values()
+                .filter(|peer| peer.tenant_id == tenant_id)
+                .collect()
+        } else {
+            state
+                .nodes
+                .values()
+                .filter(|peer| peer.tenant_id == tenant_id)
+                .filter(|peer| peer.network_id == node.network_id)
+                .collect()
+        };
+
+        let peers = reachable
+            .into_iter()
             .filter(|peer| peer.id != node.id)
             .map(|peer| TopologyPeer {
                 address: peer.ipv4_address.clone(),
@@ -814,6 +829,7 @@ impl Controller {
         node_id: &str,
         endpoint: &str,
         pq_public_key: &str,
+        relay: bool,
         usage: NodeUsage,
     ) -> Result<Node> {
         let mut state = self.inner.state.write().await;
@@ -834,6 +850,8 @@ impl Controller {
             if !pq_public_key.is_empty() {
                 node.pq_public_key = pq_public_key.to_string();
             }
+
+            node.relay = relay;
 
             node.clone()
         };
@@ -926,6 +944,7 @@ impl Controller {
             endpoint: None,
             public_key: hex::encode(keys.ed25519),
             pq_public_key: hex::encode(&keys.ml_dsa),
+            relay: false,
             fingerprint,
             tags,
             platform: None,

@@ -219,6 +219,30 @@ impl AsRawFd for TunDevice {
     }
 }
 
+/// A device that carries nothing.
+///
+/// A relay moves packets between peers and has no interface of its own.
+/// It still runs the data plane, so it takes one of these: reading yields
+/// nothing, and writing counts the packet without putting it anywhere.
+pub struct NullDevice;
+
+impl PacketDevice for NullDevice {
+    fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "a relay has no interface",
+        ))
+    }
+
+    fn write(&mut self, _packet: &[u8]) -> io::Result<usize> {
+        Ok(0)
+    }
+
+    fn mtu(&self) -> u16 {
+        1400
+    }
+}
+
 /// A device that carries IP packets.
 ///
 /// The data plane is written against this rather than against the device

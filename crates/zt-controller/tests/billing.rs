@@ -120,6 +120,7 @@ async fn what_a_node_carried_is_recorded() {
             &node,
             "198.51.100.7:9994",
             "",
+            false,
             NodeUsage {
                 bytes_in: 1_000,
                 bytes_out: 4_000,
@@ -150,6 +151,7 @@ async fn an_invoice_is_the_usage_times_the_rates() {
             &node,
             "198.51.100.7:9994",
             "",
+            false,
             NodeUsage {
                 bytes_in: 0,
                 bytes_out: 2_500_000_000,

@@ -124,6 +124,7 @@ impl SqliteStore {
                 endpoint TEXT,
                 public_key TEXT NOT NULL,
                 pq_public_key TEXT NOT NULL DEFAULT '',
+                relay INTEGER NOT NULL DEFAULT 0,
                 fingerprint TEXT NOT NULL,
                 tags TEXT NOT NULL DEFAULT '[]',
                 platform TEXT,
@@ -220,6 +221,7 @@ impl SqliteStore {
             ("ipv4_address", "TEXT NOT NULL DEFAULT ''"),
             ("endpoint", "TEXT"),
             ("pq_public_key", "TEXT NOT NULL DEFAULT ''"),
+            ("relay", "INTEGER NOT NULL DEFAULT 0"),
         ] {
             if !self.column_exists(&connection, "nodes", column) {
                 connection.execute(
@@ -347,16 +349,16 @@ impl SqliteStore {
     fn load_nodes(&self, connection: &Connection) -> Result<Vec<Node>> {
         let mut statement = connection.prepare(
             "SELECT id, tenant_id, network_id, name, address, ipv4_address, endpoint,
-                    public_key, pq_public_key, fingerprint, tags,
+                    public_key, pq_public_key, relay, fingerprint, tags,
                     platform, version, status, credential_issued_at, credential_not_after,
                     last_seen, created_at
              FROM nodes ORDER BY created_at, id",
         )?;
         let rows = statement
             .query_map([], |row| {
-                let tags_json: String = row.get(10)?;
+                let tags_json: String = row.get(11)?;
                 let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                let status: String = row.get(13)?;
+                let status: String = row.get(14)?;
                 Ok(Node {
                     id: row.get(0)?,
                     tenant_id: row.get(1)?,
@@ -367,15 +369,16 @@ impl SqliteStore {
                     endpoint: row.get(6)?,
                     public_key: row.get(7)?,
                     pq_public_key: row.get(8)?,
-                    fingerprint: row.get(9)?,
+                    relay: row.get::<_, i64>(9)? != 0,
+                    fingerprint: row.get(10)?,
                     tags,
-                    platform: row.get(11)?,
-                    version: row.get(12)?,
+                    platform: row.get(12)?,
+                    version: row.get(13)?,
                     status: parse_node_status(&status),
-                    credential_issued_at: row.get::<_, i64>(14)? as u64,
-                    credential_not_after: row.get::<_, i64>(15)? as u64,
-                    last_seen: row.get::<_, Option<i64>>(16)?.map(|value| value as u64),
-                    created_at: row.get::<_, i64>(17)? as u64,
+                    credential_issued_at: row.get::<_, i64>(15)? as u64,
+                    credential_not_after: row.get::<_, i64>(16)? as u64,
+                    last_seen: row.get::<_, Option<i64>>(17)?.map(|value| value as u64),
+                    created_at: row.get::<_, i64>(18)? as u64,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -560,11 +563,11 @@ impl Store for SqliteStore {
         for node in state.nodes.values() {
             transaction.execute(
                 "INSERT INTO nodes(id, tenant_id, network_id, name, address, ipv4_address,
-                                   endpoint, public_key, pq_public_key, fingerprint, tags,
-                                   platform, version, status, credential_issued_at,
+                                   endpoint, public_key, pq_public_key, relay, fingerprint,
+                                   tags, platform, version, status, credential_issued_at,
                                    credential_not_after, last_seen, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                         ?16, ?17, ?18)",
+                         ?16, ?17, ?18, ?19)",
                 params![
                     node.id,
                     node.tenant_id,
@@ -575,6 +578,7 @@ impl Store for SqliteStore {
                     node.endpoint,
                     node.public_key,
                     node.pq_public_key,
+                    node.relay,
                     node.fingerprint,
                     serde_json::to_string(&node.tags).unwrap_or_else(|_| "[]".into()),
                     node.platform,

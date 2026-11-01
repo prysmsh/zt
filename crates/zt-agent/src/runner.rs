@@ -38,6 +38,9 @@ use crate::error::{AgentError, Result};
 #[derive(Clone, Debug)]
 pub struct RunnerConfig {
     /// The name of the interface to open.
+    ///
+    /// A relay has no interface, so this is ignored when [`Self::relay`]
+    /// is set.
     pub interface: String,
     /// The maximum transmission unit.
     pub mtu: u16,
@@ -47,6 +50,8 @@ pub struct RunnerConfig {
     pub refresh_interval: Duration,
     /// How often a handshake is retried.
     pub handshake_interval: Duration,
+    /// Whether this node forwards packets between the others.
+    pub relay: bool,
 }
 
 impl Default for RunnerConfig {
@@ -57,6 +62,7 @@ impl Default for RunnerConfig {
             listen: SocketAddr::from(([0, 0, 0, 0], 9994)),
             refresh_interval: Duration::from_secs(30),
             handshake_interval: Duration::from_secs(5),
+            relay: false,
         }
     }
 }
@@ -118,7 +124,8 @@ impl Runner {
         // peer presents, so a handshake can complete.
         node.set_trust(trust);
 
-        let plane = DataPlane::new(device);
+        let mut plane = DataPlane::new(device);
+        plane.set_relaying(config.relay);
 
         Ok(Self {
             node,
@@ -146,6 +153,9 @@ impl Runner {
     /// The node's own address, the range it lives in, and the peers it
     /// shares the range with. A peer that has not reported an endpoint is
     /// left out: there is nowhere to send its packets.
+    ///
+    /// A relay is handed every host in the network, because a host may ask
+    /// it to reach any of them.
     pub fn refresh_topology(&mut self) -> Result<()> {
         let topology = self.client.topology()?;
 
@@ -262,7 +272,7 @@ impl Runner {
                 continue;
             };
 
-            received += self.plane.forward_inbound(from, &packets)?;
+            received += self.plane.forward_inbound(&mut self.node, from, &packets)?;
         }
 
         let sent = self.plane.forward_outbound(&mut self.node)?;
