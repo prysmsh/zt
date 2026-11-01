@@ -101,15 +101,30 @@ Good news: ZT-next already uses X25519, ChaCha20-Poly1305, HKDF-SHA256, and
 BLAKE3. The Tailscale dialect is a *rearrangement* of primitives ZT-next
 already has, plus a faithful implementation of the Noise IK label set.
 
-**One deviation remains.** Upstream WireGuard hashes the handshake transcript
-with BLAKE2s. ZT-next uses BLAKE3, and the current implementation keeps
-BLAKE3. A `tailscaled` peer will reject the handshake. Switching to BLAKE2s
-means adding the `blake2` crate, which is the only new dependency this dialect
-requires.
+**The hash is now BLAKE2s.** The transcript, the key schedule, and the
+construction constants all match upstream exactly:
 
-This is recorded in `zt_legacy::wireguard::HASH_NOTE` rather than hidden,
-because claiming interoperability that does not work is worse than shipping a
-partial implementation.
+- The hash is BLAKE2s, and the key schedule is a chain of HMAC-BLAKE2s
+  operations rather than HKDF-SHA256.
+- The construction is `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s`, including
+  the preshared-key variant that WireGuard always uses.
+- The identifier `WireGuard v1 zx2c4 Jason@zx2c4.com` is mixed into the
+  transcript before anything else.
+- The transcript is a *chain*: each step hashes the previous state with the
+  new input, rather than hashing all the inputs together.
+
+These are checked against WireGuard's own published test vectors, so a peer
+running the same handshake computes the same bytes. The vectors are in
+`crates/zt-legacy/src/wireguard.rs`.
+
+**What is not implemented yet** is the handshake *message framing*: the
+initiation and response packets, their fields, and their MAC values. The
+primitives are exact, but a handshake cannot be completed with a
+`tailscaled` peer until the framing exists.
+
+This is recorded in `zt_legacy::wireguard::MESSAGE_FRAMING_NOTE` rather than
+hidden, because claiming interoperability that does not work is worse than
+shipping a partial implementation.
 
 ### ZeroTier dialect
 
@@ -331,7 +346,7 @@ Tailscale's protocol is open source, so the equivalent approach is:
 | ZT-next native handshake and data plane | ✅ complete |
 | Transport dispatcher with exact prefix matching | ✅ implemented (`zt-node/src/dialect.rs`) |
 | Native handshake magic prefix | ✅ implemented, resolves the WireGuard type collision |
-| Tailscale dialect: WireGuard key schedule and transport | ✅ implemented, **not yet wire-compatible** (BLAKE3 vs BLAKE2s) |
+| Tailscale dialect: WireGuard primitives, transcript, and transport | ✅ exact primitives (BLAKE2s, verified against upstream vectors), **message framing still missing** |
 | Tailscale dialect: Noise IK handshake messages | not started |
 | ZeroTier dialect: 64-byte key set | ✅ implemented |
 | ZeroTier dialect: 96-byte custom signature | ✅ implemented, verified against the oracle |

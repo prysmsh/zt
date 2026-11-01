@@ -10,8 +10,11 @@
 //!
 //! # Status
 //!
-//! The Tailscale dialect is structurally complete but uses BLAKE3 for the
-//! transcript hash where upstream WireGuard uses BLAKE2s. It is therefore
+//! The Tailscale dialect's primitives, transcript, and key schedule match
+//! upstream WireGuard exactly, and are checked against WireGuard's own
+//! published test vectors. The handshake message framing is not implemented
+//! yet, so a handshake cannot yet be completed with a `tailscaled` peer. It
+//! is therefore
 //! **not** yet wire-compatible with `tailscaled`. The deviation is recorded
 //! in [`wireguard::HASH_NOTE`].
 //!
@@ -31,9 +34,10 @@ pub use hashcash::{address_from_public_key, memory_hard_hash};
 pub use packet::{Cipher, LegacyPacket, Verb};
 pub use salsa20::{Poly1305, Salsa20};
 pub use wireguard::{
-    derive_session_keys, transport_decrypt, transport_encrypt, transport_nonce, KeySchedule,
-    SessionKeys, StaticKey, TransportSession, AEAD_KEY_LEN, KEY_LEN, REKEY_AFTER_MESSAGES,
-    REKEY_AFTER_TIME, TAG_LEN,
+    derive_session_keys, hmac, hash, initial_chain_key, initial_hash, kdf1, kdf2, kdf3, mix_hash,
+    transport_decrypt, transport_encrypt, transport_nonce, SessionKeys, StaticKey, Transcript,
+    TransportSession, AEAD_KEY_LEN, BLOCK_LEN, KEY_LEN, PROTOCOL_NAME, REKEY_AFTER_MESSAGES,
+    REKEY_AFTER_TIME, TAG_LEN, WG_IDENTIFIER, WG_LABEL_COOKIE, WG_LABEL_MAC1,
 };
 pub use zerotier::{
     agree, is_reserved_address, LegacyAddress, LegacyIdentity, LegacySignature, ADDRESS_LEN,

@@ -6,6 +6,7 @@ members = [
     "crates/zt-controller",
     "crates/zt-legacy",
     "crates/zt-agent",
+    "crates/zt-tun",
     "crates/zt-testvectors",
 ]
 

@@ -1,0 +1,16 @@
+[package]
+name = "zt-tun"
+description = "A Linux TUN device for the ZT-next data plane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc = "0.2"
+
+[lints.rust]
+# The device is driven with ioctl, which is unsafe. The unsafe is confined
+# to this module: the rest of the crate, and everything above it, uses only
+# safe code.
+unsafe_code = "allow"
