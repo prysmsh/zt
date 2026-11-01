@@ -378,6 +378,58 @@ docker compose up -d
 
 Every node must then re-enroll.
 
+## The tenant must be out of development mode
+
+A tenant that is in development mode says so in two places: the sign-in
+page carries a "You're in development mode" banner, and the admin console
+offers to create a production tenant instead. Neither belongs on a
+deployment that is being used.
+
+The provider decides this from the tenant's tag, and the banner only
+appears when the provider runs in cloud mode — which it does, so that its
+admin console works. `deploy/verity/production-tenant.sql` takes the
+tenant out of development mode:
+
+```bash
+docker cp production-tenant.sql verity-deploy-postgres-1:/tmp/production-tenant.sql
+docker exec verity-deploy-postgres-1 psql -U postgres -d logto -f /tmp/production-tenant.sql
+```
+
+The provider caches the answer, so it has to be restarted for the change
+to take effect:
+
+```bash
+docker compose restart logto
+```
+
+## The node agent
+
+A node is shown as online while it keeps talking to the controller, and as
+offline once it stops. It talks to the controller by checking in, which
+`zt-agent checkin` does.
+
+```text
+$ zt-agent checkin --controller https://zt.hardening.dev \
+    --tenant <tenant-id> --state ~/zt-node/node.json --interval 30
+```
+
+`deploy/zt-agent.service` is that as a systemd unit. The node's identity
+is created on first run:
+
+```text
+$ zt-agent identity --controller https://zt.hardening.dev --tenant <tenant-id>
+public key: 3b2603764788463801053de34bb964b1bc03c84144a4b09da5865ab84db4a086
+```
+
+That key is what the operator enters in the console's "Enroll node"
+dialog. The console then issues the node's credential, and the node
+adopts it:
+
+```text
+$ zt-agent adopt --credential <credential> --controller https://zt.hardening.dev \
+    --tenant <tenant-id> --state ~/zt-node/node.json
+```
+
 ## What this does not cover
 
 - **The master console has no per-action audit of who did what.** The
