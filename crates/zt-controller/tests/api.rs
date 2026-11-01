@@ -543,6 +543,102 @@ async fn deleting_a_node_requires_revocation_first_and_frees_the_row() {
 }
 
 #[tokio::test]
+async fn deleting_a_network_takes_its_nodes_with_it() {
+    let app = app();
+    let tenant_id = tenant(&app, "Acme").await;
+    let network_id = network(&app, &tenant_id, "Production", "10.42.0.0/24").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "network_id": network_id,
+                        "name": "web-01",
+                        "public_key": "dd".repeat(32)
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let node_id = json_body(response).await["node"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Delete the network. The node that lived in it goes with it.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/t/{tenant_id}/networks/{network_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // The node list no longer holds it, and the network list no longer
+    // holds the network.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/t/{tenant_id}/nodes"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let listed = json_body(response).await;
+    let ids: Vec<String> = listed["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|node| node["id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(!ids.contains(&node_id), "the node went with its network");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/t/{tenant_id}/networks"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let listed = json_body(response).await;
+    let networks: Vec<String> = listed["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|network| network["id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(!networks.contains(&network_id), "the network is gone");
+}
+
+#[tokio::test]
 async fn enrollment_rejects_invalid_public_key() {
     let app = app();
     let tenant = tenant(&app, "Acme").await;

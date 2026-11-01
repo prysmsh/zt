@@ -111,6 +111,8 @@ export interface ApiClient {
   revokeNode(nodeId: string): Promise<void>
   /** Revoke every pending join request at once. Returns how many. */
   rejectPendingNodes(): Promise<number>
+  /** Delete a network and everything scoped to it. */
+  deleteNetwork(networkId: string): Promise<void>
   /** Revoke a picked set of nodes. Returns how many changed. */
   revokeNodes(ids: string[]): Promise<number>
   /** Delete a revoked node outright. The row is gone for good. */
@@ -316,6 +318,11 @@ export function createHttpClient(
     },
     async deleteNode(nodeId) {
       await request<void>(`${tenantBase}/nodes/${encodeURIComponent(nodeId)}/delete`, { method: 'POST' })
+    },
+    async deleteNetwork(networkId) {
+      await request<void>(`${tenantBase}/networks/${encodeURIComponent(networkId)}`, {
+        method: 'DELETE',
+      })
     },
     async deleteRevokedNodes() {
       const result = await request<{ deleted: number }>(

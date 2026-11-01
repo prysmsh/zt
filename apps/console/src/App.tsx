@@ -146,7 +146,16 @@ function NetworkIcon({ accent }: { accent: Network['accent'] }) {
   )
 }
 
-function NetworkRows({ items, onOpen }: { items: Network[]; onOpen?: (network: Network) => void }) {
+function NetworkRows({
+  items,
+  onOpen,
+  onDelete,
+}: {
+  items: Network[]
+  onOpen?: (network: Network) => void
+  /** Delete a network and everything scoped to it. */
+  onDelete?: (network: Network) => void
+}) {
   if (items.length === 0) {
     return (
       <EmptyView
@@ -159,28 +168,74 @@ function NetworkRows({ items, onOpen }: { items: Network[]; onOpen?: (network: N
   return (
     <div className="network-list">
       {items.map((network) => (
-        <button type="button" className="network-row" key={network.id} onClick={() => onOpen?.(network)}>
-          <div className="network-name">
-            <NetworkIcon accent={network.accent} />
-            <div>
-              <strong>{network.name}</strong>
-              <span>{network.cidr}</span>
-            </div>
-          </div>
-          <div>
-            <span className="metric-label">Nodes</span>
-            <span className="metric-value">
-              {network.onlineCount}/{network.nodeCount} online
-            </span>
-          </div>
-          <div>
-            <span className="metric-label">Relays</span>
-            <span className="metric-value">{network.relayCount} active</span>
-          </div>
-          <StatusPill status={network.status === 'healthy' ? 'online' : 'degraded'} />
-          <ChevronRight size={15} color="#8e8e93" />
-        </button>
+        <NetworkRow key={network.id} network={network} onOpen={onOpen} onDelete={onDelete} />
       ))}
+    </div>
+  )
+}
+
+function NetworkRow({
+  network,
+  onOpen,
+  onDelete,
+}: {
+  network: Network
+  onOpen?: (network: Network) => void
+  onDelete?: (network: Network) => void
+}) {
+  // Two steps, because a network carries its nodes, policies, and relays
+  // with it. The second click is the decision.
+  const [confirming, setConfirming] = useState(false)
+  useEffect(() => {
+    setConfirming(false)
+  }, [network.id])
+
+  return (
+    <div className="network-row">
+      <button type="button" className="network-row-open" onClick={() => onOpen?.(network)}>
+        <div className="network-name">
+          <NetworkIcon accent={network.accent} />
+          <div>
+            <strong>{network.name}</strong>
+            <span>{network.cidr}</span>
+          </div>
+        </div>
+        <div>
+          <span className="metric-label">Nodes</span>
+          <span className="metric-value">
+            {network.onlineCount}/{network.nodeCount} online
+          </span>
+        </div>
+        <div>
+          <span className="metric-label">Relays</span>
+          <span className="metric-value">{network.relayCount} active</span>
+        </div>
+        <StatusPill status={network.status === 'healthy' ? 'online' : 'degraded'} />
+        <ChevronRight size={15} color="#8e8e93" />
+      </button>
+      {onDelete ? (
+        <div className="network-row-actions">
+          {confirming ? (
+            <>
+              <button
+                type="button"
+                className="button danger"
+                onClick={() => onDelete(network)}
+                onBlur={() => setConfirming(false)}
+              >
+                Delete {network.nodeCount} nodes
+              </button>
+              <button type="button" className="button" onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" className="button" onClick={() => setConfirming(true)}>
+              Delete
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -595,7 +650,14 @@ function NetworksPage({
         </div>
       </div>
       <section className="panel">
-        <NetworkRows items={networks} onOpen={onOpenNetwork} />
+        <NetworkRows
+          items={networks}
+          onOpen={onOpenNetwork}
+          onDelete={async (network) => {
+            await api.deleteNetwork(network.id)
+            onChanged()
+          }}
+        />
       </section>
       {creating ? (
         <CreateNetworkDialog

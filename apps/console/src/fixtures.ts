@@ -393,6 +393,12 @@ export function createFixtureClient(): ApiClient {
       if (node.status !== 'revoked') throw new Error('only a revoked node can be deleted')
       controllerNodes.splice(controllerNodes.indexOf(node), 1)
     },
+    async deleteNetwork(networkId) {
+      await delay()
+      const index = controllerNetworks.findIndex((item) => item.id === networkId)
+      if (index < 0) throw new Error('network not found')
+      controllerNetworks.splice(index, 1)
+    },
     async deleteRevokedNodes() {
       await delay()
       let deleted = 0
