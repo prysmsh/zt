@@ -27,7 +27,7 @@ use zt_crypto::membership::{ControllerTrust, Membership, TrustedController};
 
 pub use client::{ControllerClient, ControllerNode, EnrollResponse};
 pub use error::{AgentError, Result};
-pub use state::{NodeState, default_state_path};
+pub use state::{default_state_path, NodeState};
 
 /// Configuration for an agent.
 #[derive(Clone, Debug)]
@@ -89,11 +89,7 @@ impl Agent {
             (Some(key), Some(id))
         };
 
-        let state = NodeState::load_or_create(
-            &config.state_path,
-            controller_key,
-            controller_id,
-        )?;
+        let state = NodeState::load_or_create(&config.state_path, controller_key, controller_id)?;
 
         // The client presents the node's credential, so the controller can
         // tell which node is calling. A node that has not enrolled yet has
@@ -136,11 +132,13 @@ impl Agent {
     /// short-lived credential, which is stored.
     pub fn enroll(&mut self, name: &str, tags: &[String]) -> Result<EnrollResponse> {
         let public_key = self.state.public_key_hex()?;
+        let pq_public_key = self.state.pq_public_key_hex()?;
 
         let response = self.client.enroll(
             &self.config.network_id,
             name,
             &public_key,
+            &pq_public_key,
             tags,
         )?;
 
@@ -176,22 +174,14 @@ impl Agent {
         )
         .map_err(|error| AgentError::Credential(error.to_string()))?;
 
-        self.state.set_credential(
-            "",
-            "",
-            credential,
-            parsed.not_after(),
-        );
+        self.state
+            .set_credential("", "", credential, parsed.not_after());
         self.client.set_credential(credential);
 
         // The controller knows which node the credential belongs to.
         let node = self.client.self_node()?;
-        self.state.set_credential(
-            &node.id,
-            &node.network_id,
-            credential,
-            parsed.not_after(),
-        );
+        self.state
+            .set_credential(&node.id, &node.network_id, credential, parsed.not_after());
         self.state.write(&self.config.state_path)?;
 
         Ok(node)
@@ -375,9 +365,12 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("node.json");
-        let mut state =
-            NodeState::load_or_create(&path, Some(controller.public_key()), Some(*controller.controller_id()))
-                .expect("create");
+        let mut state = NodeState::load_or_create(
+            &path,
+            Some(controller.public_key()),
+            Some(*controller.controller_id()),
+        )
+        .expect("create");
         state.set_credential(
             "node-1",
             "net-1",

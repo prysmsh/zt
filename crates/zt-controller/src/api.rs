@@ -25,7 +25,7 @@ use serde_json::json;
 
 use crate::error::ControllerError;
 use crate::middleware::{require_auth, AuthState};
-use crate::model::{Network, Node, Policy, Relay, Selector, Topology};
+use crate::model::{Network, Node, NodeKeys, Policy, Relay, Selector, Topology};
 use crate::principal::Principal;
 use crate::service::{ControlPlaneHealth, Controller};
 use crate::tenant::{Deployment, Tenant, TenantLimits};
@@ -83,10 +83,11 @@ fn build_router(controller: Controller) -> Router {
         // The topology a node needs to carry traffic: its own address, the
         // range it lives in, and the peers it shares the range with.
         .route("/api/v1/t/{tenant}/topology", get(get_topology))
-        // A node reports the endpoint its peers reach it at.
+        // A node reports how its peers reach it: the endpoint they send
+        // to, and the post-quantum key they check its signature with.
         .route(
-            "/api/v1/t/{tenant}/nodes/self/endpoint",
-            post(report_endpoint),
+            "/api/v1/t/{tenant}/nodes/self/presence",
+            post(report_presence),
         )
         .route(
             "/api/v1/t/{tenant}/nodes/{id}/credential",
@@ -378,6 +379,12 @@ struct EnrollNodeRequest {
     name: String,
     /// Hex-encoded Ed25519 public key.
     public_key: String,
+    /// Hex-encoded ML-DSA-65 public key.
+    ///
+    /// A peer needs it to complete a handshake, so a node that does not
+    /// send it cannot be reached.
+    #[serde(default)]
+    pq_public_key: String,
     #[serde(default)]
     tags: Vec<String>,
 }
@@ -402,12 +409,18 @@ async fn enroll_node(
         ControllerError::InvalidRequest("public_key must be exactly 32 bytes".into())
     })?;
 
+    let pq_public_key = hex::decode(&request.pq_public_key)
+        .map_err(|_| ControllerError::InvalidRequest("pq_public_key must be hex encoded".into()))?;
+
     let (node, credential) = controller
         .enroll_node(
             &tenant,
             &request.network_id,
             request.name,
-            public_key,
+            NodeKeys {
+                ed25519: public_key,
+                ml_dsa: pq_public_key,
+            },
             request.tags,
             &principal.actor(),
         )
@@ -459,20 +472,32 @@ async fn get_topology(
 }
 
 #[derive(Debug, Deserialize)]
-struct EndpointRequest {
+struct PresenceRequest {
+    /// The address the node's peers reach it at.
     endpoint: String,
+    /// The node's ML-DSA-65 public key, hex encoded.
+    ///
+    /// A peer needs it to complete a handshake. The key is generated when
+    /// the node starts, so a node reports it every time it comes up.
+    #[serde(default)]
+    pq_public_key: String,
 }
 
-async fn report_endpoint(
+async fn report_presence(
     State(controller): State<Controller>,
     Path(tenant): Path<String>,
     principal: Principal,
-    Json(request): Json<EndpointRequest>,
+    Json(request): Json<PresenceRequest>,
 ) -> Result<Json<Node>, ControllerError> {
-    // A node may only report its own endpoint. The subject of its
+    // A node may only report its own presence. The subject of its
     // credential is its identifier, so there is no path to tamper with.
     let node = controller
-        .set_node_endpoint(&tenant, principal.subject(), &request.endpoint)
+        .report_presence(
+            &tenant,
+            principal.subject(),
+            &request.endpoint,
+            &request.pq_public_key,
+        )
         .await?;
     Ok(Json(node))
 }

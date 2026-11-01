@@ -10,7 +10,13 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 use zt_controller::auth::{AuthConfig, Verifier};
 use zt_controller::middleware::AuthState;
+use zt_controller::model::NodeKeys;
 use zt_controller::{router_with_auth, Controller};
+
+/// A post-quantum public key for a test node.
+fn pq_public_key() -> Vec<u8> {
+    vec![7u8; 1952]
+}
 
 /// A controller with authentication enabled, and the identity state a node
 /// needs to enrol.
@@ -92,7 +98,10 @@ async fn a_node_credential_authenticates_its_owner() {
             &tenant.id,
             &network.id,
             "web-01".into(),
-            node_key,
+            NodeKeys {
+                ed25519: node_key,
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )
@@ -165,7 +174,10 @@ async fn a_node_credential_cannot_reach_the_master_console() {
             &tenant.id,
             &network.id,
             "web-01".into(),
-            [7u8; 32],
+            NodeKeys {
+                ed25519: [7u8; 32],
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )
@@ -236,7 +248,10 @@ async fn a_node_credential_cannot_reach_another_tenant() {
             &first.id,
             &network.id,
             "web-01".into(),
-            [7u8; 32],
+            NodeKeys {
+                ed25519: [7u8; 32],
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )
@@ -347,7 +362,10 @@ async fn a_node_asks_the_controller_who_it_is() {
             &tenant.id,
             &network.id,
             "web-01".into(),
-            [7u8; 32],
+            NodeKeys {
+                ed25519: [7u8; 32],
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )

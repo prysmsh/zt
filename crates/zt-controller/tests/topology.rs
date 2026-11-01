@@ -10,7 +10,13 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 use zt_controller::auth::{AuthConfig, Verifier};
 use zt_controller::middleware::AuthState;
+use zt_controller::model::NodeKeys;
 use zt_controller::{router_with_auth, Controller};
+
+/// A post-quantum public key for a test node.
+fn pq_public_key() -> Vec<u8> {
+    vec![7u8; 1952]
+}
 
 /// A controller with authentication enabled.
 struct Fixture {
@@ -109,7 +115,10 @@ async fn enroll(
             tenant,
             network,
             name.into(),
-            key,
+            NodeKeys {
+                ed25519: key,
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )
@@ -215,7 +224,7 @@ async fn a_reported_endpoint_reaches_the_other_node() {
         .app
         .clone()
         .oneshot(with_token(
-            &format!("/api/v1/t/{tenant}/nodes/self/endpoint"),
+            &format!("/api/v1/t/{tenant}/nodes/self/presence"),
             "POST",
             &second_token,
             Some(&json!({ "endpoint": "198.51.100.7:9994" }).to_string()),
@@ -246,6 +255,53 @@ async fn a_reported_endpoint_reaches_the_other_node() {
 }
 
 #[tokio::test]
+async fn a_reported_post_quantum_key_reaches_the_other_node() {
+    let fixture = fixture().await;
+    let (tenant, network) = tenant_with_network(&fixture, "Acme", "acme", "10.42.0.0/24").await;
+
+    let (_, first_token) = enroll(&fixture, &tenant, &network, "web-01", [1u8; 32]).await;
+    let (_, second_token) = enroll(&fixture, &tenant, &network, "web-02", [2u8; 32]).await;
+
+    let pq_public_key = "ab".repeat(976);
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(with_token(
+            &format!("/api/v1/t/{tenant}/nodes/self/presence"),
+            "POST",
+            &second_token,
+            Some(
+                &json!({
+                    "endpoint": "198.51.100.7:9994",
+                    "pq_public_key": pq_public_key,
+                })
+                .to_string(),
+            ),
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The first node now sees the key it needs to complete a handshake.
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(with_token(
+            &format!("/api/v1/t/{tenant}/topology"),
+            "GET",
+            &first_token,
+            None,
+        ))
+        .await
+        .expect("response");
+
+    let body = json_body(response).await;
+    let peers = body["peers"].as_array().expect("peers");
+    assert_eq!(peers[0]["pq_public_key"], json!(pq_public_key));
+}
+
+#[tokio::test]
 async fn a_node_cannot_report_the_endpoint_of_another_node() {
     let fixture = fixture().await;
     let (tenant, network) = tenant_with_network(&fixture, "Acme", "acme", "10.42.0.0/24").await;
@@ -259,7 +315,7 @@ async fn a_node_cannot_report_the_endpoint_of_another_node() {
         .app
         .clone()
         .oneshot(with_token(
-            &format!("/api/v1/t/{tenant}/nodes/self/endpoint"),
+            &format!("/api/v1/t/{tenant}/nodes/self/presence"),
             "POST",
             &first_token,
             Some(&json!({ "endpoint": "198.51.100.7:9994" }).to_string()),

@@ -24,8 +24,8 @@ use zt_crypto::identity::{Address, Identity};
 use crate::address::{assign_address, Ipv4Range};
 use crate::error::{ControllerError, Result};
 use crate::model::{
-    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, Relay,
-    RelayStatus, Topology, TopologyPeer,
+    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeKeys, NodeStatus,
+    Policy, Relay, RelayStatus, Topology, TopologyPeer,
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
@@ -621,6 +621,7 @@ impl Controller {
             .map(|peer| TopologyPeer {
                 address: peer.ipv4_address.clone(),
                 public_key: peer.public_key.clone(),
+                pq_public_key: peer.pq_public_key.clone(),
                 endpoint: peer.endpoint.clone(),
             })
             .collect();
@@ -633,16 +634,18 @@ impl Controller {
         })
     }
 
-    /// Record the endpoint a node reaches its peers at.
+    /// Record how a node's peers reach it.
     ///
     /// The node reports it, because only the node knows it: it may be
     /// behind a NAT, and the address it listens on is not the address its
-    /// peers see.
-    pub async fn set_node_endpoint(
+    /// peers see. The post-quantum key travels with it, because a peer
+    /// needs that key to complete a handshake.
+    pub async fn report_presence(
         &self,
         tenant_id: &str,
         node_id: &str,
         endpoint: &str,
+        pq_public_key: &str,
     ) -> Result<Node> {
         let mut state = self.inner.state.write().await;
 
@@ -654,6 +657,10 @@ impl Controller {
 
         node.endpoint = Some(endpoint.to_string());
         node.last_seen = Some(now_unix());
+
+        if !pq_public_key.is_empty() {
+            node.pq_public_key = pq_public_key.to_string();
+        }
 
         let node = node.clone();
         self.persist(&state).await?;
@@ -669,7 +676,7 @@ impl Controller {
         tenant_id: &str,
         network_id: &str,
         name: String,
-        public_key: [u8; 32],
+        keys: NodeKeys,
         tags: Vec<String>,
         actor: &Actor,
     ) -> Result<(Node, NodeCredential)> {
@@ -693,9 +700,9 @@ impl Controller {
             ));
         }
 
-        let address = Address::derive(network.network_id, &public_key);
+        let address = Address::derive(network.network_id, &keys.ed25519);
         let ipv4_address = self.assign_ipv4_address(&network, &state)?;
-        let fingerprint = fingerprint(&public_key);
+        let fingerprint = fingerprint(&keys.ed25519);
         let issued_at = now_unix();
         let mut nonce = [0u8; NONCE_LEN];
         {
@@ -706,7 +713,7 @@ impl Controller {
         let credential = self.inner.identity.issue(
             network.network_id,
             address,
-            &public_key,
+            &keys.ed25519,
             issued_at,
             network.credential_ttl_secs,
             &nonce,
@@ -720,7 +727,8 @@ impl Controller {
             address: address.to_hex(),
             ipv4_address,
             endpoint: None,
-            public_key: hex::encode(public_key),
+            public_key: hex::encode(keys.ed25519),
+            pq_public_key: hex::encode(&keys.ml_dsa),
             fingerprint,
             tags,
             platform: None,

@@ -321,6 +321,21 @@ impl MlDsa65KeyPair {
         Ok(Self { sk })
     }
 
+    /// Restore a key pair from its 32-byte seed.
+    ///
+    /// The seed is what a node keeps, so its key survives a restart and
+    /// its peers do not have to learn a new one.
+    pub fn from_seed(seed: &[u8; 32]) -> Result<Self> {
+        // The seed is a fixed-size array in the underlying crate, and the
+        // conversion is checked by the type.
+        let seed: ml_dsa::Seed = seed
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::InvalidKey("the ML-DSA seed must be 32 bytes"))?;
+        let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+        Ok(Self { sk })
+    }
+
     /// The verification (public) key, 1952 bytes.
     pub fn public_key(&self) -> Vec<u8> {
         let array = self.sk.verifying_key().to_bytes();
@@ -451,6 +466,20 @@ mod tests {
         let (ct2, ss2) = kp.encapsulate(&mut rng2());
         assert_ne!(ct1, ct2);
         assert_ne!(ss1, ss2);
+    }
+
+    #[test]
+    fn an_ml_dsa_key_pair_is_restored_from_its_seed() {
+        let seed = [0x5au8; 32];
+        let first = MlDsa65KeyPair::from_seed(&seed).expect("key");
+        let second = MlDsa65KeyPair::from_seed(&seed).expect("key");
+
+        assert_eq!(first.public_key(), second.public_key());
+
+        // The same key signs, and the same key verifies.
+        let message = b"the same key after a restart";
+        let signature = first.sign(message).expect("sign");
+        MlDsa65KeyPair::verify(&second.public_key(), message, &signature).expect("verify");
     }
 
     #[test]

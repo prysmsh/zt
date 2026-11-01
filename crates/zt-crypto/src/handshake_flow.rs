@@ -186,6 +186,14 @@ impl StaticIdentity {
         })
     }
 
+    /// Create a static identity from an Ed25519 key and an ML-DSA key.
+    ///
+    /// A node keeps the seed of its post-quantum key, so the key survives
+    /// a restart and its peers do not have to learn a new one.
+    pub fn with_pq(identity: Identity, pq: MlDsa65KeyPair) -> Self {
+        Self { identity, pq }
+    }
+
     /// The Ed25519 public key.
     pub fn public_key(&self) -> [u8; 32] {
         self.identity.public_key_bytes()
@@ -984,38 +992,38 @@ mod tests {
     }
 
     /// Build a membership for an identity, signed by a controller.
-fn membership_for(
-    controller: &crate::credential::ControllerIdentity,
-    identity: &Identity,
-    network_id: u64,
-    now: u64,
-) -> Membership {
-    let mut membership = Membership::new();
-    membership.add(
-        network_id,
-        controller.issue(
+    fn membership_for(
+        controller: &crate::credential::ControllerIdentity,
+        identity: &Identity,
+        network_id: u64,
+        now: u64,
+    ) -> Membership {
+        let mut membership = Membership::new();
+        membership.add(
             network_id,
-            identity.address_for_network(network_id),
-            &identity.public_key_bytes(),
-            now,
-            3600,
-            &[9u8; 16],
-        ),
-    );
-    membership
-}
+            controller.issue(
+                network_id,
+                identity.address_for_network(network_id),
+                &identity.public_key_bytes(),
+                now,
+                3600,
+                &[9u8; 16],
+            ),
+        );
+        membership
+    }
 
-/// Build a trust set that accepts the given controller.
-fn trust_for(controller: &crate::credential::ControllerIdentity) -> ControllerTrust {
-    let mut trust = ControllerTrust::new();
-    trust.add(crate::membership::TrustedController {
-        public_key: controller.public_key(),
-        controller_id: *controller.controller_id(),
-    });
-    trust
-}
+    /// Build a trust set that accepts the given controller.
+    fn trust_for(controller: &crate::credential::ControllerIdentity) -> ControllerTrust {
+        let mut trust = ControllerTrust::new();
+        trust.add(crate::membership::TrustedController {
+            public_key: controller.public_key(),
+            controller_id: *controller.controller_id(),
+        });
+        trust
+    }
 
-#[test]
+    #[test]
     fn a_peer_with_valid_credentials_is_accepted() {
         let now = crate::time::now_unix();
 
@@ -1030,19 +1038,15 @@ fn trust_for(controller: &crate::credential::ControllerIdentity) -> ControllerTr
             SigSuite::Ed25519,
         )
         .unwrap();
-        init.set_membership(membership_for(
-            &controller,
-            &client.identity,
-            42,
-            now,
-        ));
+        init.set_membership(membership_for(&controller, &client.identity, 42, now));
 
         let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
         resp.set_trust(trust_for(&controller));
         resp.require_membership(true);
 
         let m1 = init.write_message_1().unwrap();
-        resp.read_message_1(&m1).expect("credentialed peer is accepted");
+        resp.read_message_1(&m1)
+            .expect("credentialed peer is accepted");
 
         // The verified membership is available to the responder.
         let membership = resp.peer_membership().expect("membership");

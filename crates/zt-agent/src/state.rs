@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use zt_crypto::credential::NodeCredential;
+use zt_crypto::handshake_flow::StaticIdentity;
 use zt_crypto::identity::Identity;
+use zt_crypto::pq::MlDsa65KeyPair;
 
 use crate::error::{AgentError, Result};
 
@@ -18,6 +20,11 @@ use crate::error::{AgentError, Result};
 pub struct NodeState {
     /// The node's long-term Ed25519 seed, hex encoded.
     pub identity_seed: String,
+    /// The seed of the node's ML-DSA-65 signing key, hex encoded.
+    ///
+    /// The key it produces is what a peer checks the node's handshake
+    /// signature with, so it has to survive a restart.
+    pub pq_seed: String,
     /// The controller's Ed25519 public key, hex encoded.
     pub controller_key: String,
     /// The controller's identifier, hex encoded.
@@ -52,11 +59,18 @@ impl NodeState {
             ));
         };
 
-        let identity = Identity::generate()
-            .map_err(|error| AgentError::Crypto(error.to_string()))?;
+        let identity =
+            Identity::generate().map_err(|error| AgentError::Crypto(error.to_string()))?;
+
+        let mut pq_seed = [0u8; 32];
+        {
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut pq_seed);
+        }
 
         let state = NodeState {
             identity_seed: hex::encode(identity.private_key_bytes()),
+            pq_seed: hex::encode(pq_seed),
             controller_key: hex::encode(controller_key),
             controller_id: hex::encode(controller_id.unwrap_or([0u8; 16])),
             node_id: String::new(),
@@ -71,9 +85,8 @@ impl NodeState {
 
     /// Read the state from disk.
     pub fn read(path: &Path) -> Result<NodeState> {
-        let contents = std::fs::read_to_string(path).map_err(|error| {
-            AgentError::Io(format!("cannot read {}: {error}", path.display()))
-        })?;
+        let contents = std::fs::read_to_string(path)
+            .map_err(|error| AgentError::Io(format!("cannot read {}: {error}", path.display())))?;
         serde_json::from_str(&contents)
             .map_err(|error| AgentError::InvalidConfig(format!("invalid node state: {error}")))
     }
@@ -102,9 +115,7 @@ impl NodeState {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))
-                .map_err(|error| {
-                    AgentError::Io(format!("cannot set permissions: {error}"))
-                })?;
+                .map_err(|error| AgentError::Io(format!("cannot set permissions: {error}")))?;
         }
 
         std::fs::rename(&temporary, path).map_err(|error| {
@@ -126,6 +137,36 @@ impl NodeState {
     /// The node's public key, hex encoded.
     pub fn public_key_hex(&self) -> Result<String> {
         Ok(hex::encode(self.identity()?.public_key_bytes()))
+    }
+
+    /// The node's post-quantum key pair.
+    ///
+    /// It is restored from the stored seed, so it is the same key after a
+    /// restart.
+    pub fn pq_key_pair(&self) -> Result<MlDsa65KeyPair> {
+        let bytes = hex::decode(&self.pq_seed).map_err(|_| {
+            AgentError::InvalidConfig("the post-quantum seed is not valid hex".into())
+        })?;
+        let seed: [u8; 32] = bytes.try_into().map_err(|_| {
+            AgentError::InvalidConfig("the post-quantum seed must be 32 bytes".into())
+        })?;
+        MlDsa65KeyPair::from_seed(&seed).map_err(|error| AgentError::Crypto(error.to_string()))
+    }
+
+    /// The node's post-quantum public key, hex encoded.
+    ///
+    /// A peer needs it to complete a handshake, so the controller has to
+    /// hold it and hand it out in the topology.
+    pub fn pq_public_key_hex(&self) -> Result<String> {
+        Ok(hex::encode(self.pq_key_pair()?.public_key()))
+    }
+
+    /// The node's full static identity.
+    pub fn static_identity(&self) -> Result<StaticIdentity> {
+        Ok(StaticIdentity::with_pq(
+            self.identity()?,
+            self.pq_key_pair()?,
+        ))
     }
 
     /// The controller's public key.
@@ -206,7 +247,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("node.json");
 
-        let state = NodeState::load_or_create(&path, Some([3u8; 32]), Some([4u8; 16])).expect("create");
+        let state =
+            NodeState::load_or_create(&path, Some([3u8; 32]), Some([4u8; 16])).expect("create");
         // A fresh node has an identity but has not enrolled, so it has no
         // controller-assigned identifiers yet.
         assert!(state.node_id.is_empty());
@@ -231,7 +273,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("node.json");
 
-        let state = NodeState::load_or_create(&path, Some([3u8; 32]), Some([4u8; 16])).expect("create");
+        let state =
+            NodeState::load_or_create(&path, Some([3u8; 32]), Some([4u8; 16])).expect("create");
         let key = state.public_key_hex().expect("key");
 
         let loaded = NodeState::read(&path).expect("read");
@@ -261,7 +304,10 @@ mod tests {
         let path = dir.path().join("node.json");
         NodeState::load_or_create(&path, Some([3u8; 32]), Some([4u8; 16])).expect("create");
 
-        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 }

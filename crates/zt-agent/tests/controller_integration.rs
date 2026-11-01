@@ -32,7 +32,9 @@ impl TestController {
         let identity_path = data_dir.path().join("controller.key");
         let database_path = data_dir.path().join("controller.db");
 
-        let identity = IdentityStore::new(&identity_path).load_or_create().expect("identity");
+        let identity = IdentityStore::new(&identity_path)
+            .load_or_create()
+            .expect("identity");
         let store = Arc::new(SqliteStore::open(&database_path).expect("store"));
         let controller = Controller::with_store(identity, store).expect("controller");
 
@@ -81,7 +83,9 @@ impl TestController {
         let identity_path = data_dir.path().join("controller.key");
         let database_path = data_dir.path().join("controller.db");
 
-        let identity = IdentityStore::new(&identity_path).load_or_create().expect("identity");
+        let identity = IdentityStore::new(&identity_path)
+            .load_or_create()
+            .expect("identity");
         let store = Arc::new(SqliteStore::open(&database_path).expect("store"));
         let controller = Controller::with_store(identity, store).expect("controller");
 
@@ -179,7 +183,9 @@ async fn an_agent_enrolls_and_stores_a_valid_credential() {
     config.network_id = network_id.clone();
 
     let mut agent = Agent::open(config.clone()).expect("open");
-    let response = agent.enroll("web-01", &["web".to_string()]).expect("enroll");
+    let response = agent
+        .enroll("web-01", &["web".to_string()])
+        .expect("enroll");
 
     assert_eq!(response.node.name, "web-01");
     assert!(!response.credential.is_empty());
@@ -368,7 +374,10 @@ async fn a_node_adopts_a_credential_an_operator_issued() {
             &tenant_id,
             &network_id,
             "web-01".into(),
-            [0xab; 32],
+            zt_controller::model::NodeKeys {
+                ed25519: [0xab; 32],
+                ml_dsa: vec![0xcd; 1952],
+            },
             Vec::new(),
             &zt_controller::Actor::system(),
         )

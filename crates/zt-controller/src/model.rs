@@ -64,6 +64,12 @@ pub struct Node {
     pub endpoint: Option<String>,
     /// Ed25519 public key of the node, hex encoded.
     pub public_key: String,
+    /// The node's ML-DSA-65 public key, hex encoded.
+    ///
+    /// A peer needs it to complete a handshake: the hybrid signature suite
+    /// checks the peer's post-quantum key, so a topology without it cannot
+    /// reach the peer.
+    pub pq_public_key: String,
     /// Fingerprint shown to operators.
     pub fingerprint: String,
     #[serde(default)]
@@ -90,6 +96,18 @@ pub enum NodeStatus {
     Revoked,
 }
 
+/// The keys a node enrols with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeKeys {
+    /// The node's Ed25519 public key.
+    pub ed25519: [u8; 32],
+    /// The node's ML-DSA-65 public key.
+    ///
+    /// A peer needs it to complete a handshake, so the controller holds it
+    /// and hands it out in the topology.
+    pub ml_dsa: Vec<u8>,
+}
+
 /// What a node needs to carry traffic.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Topology {
@@ -110,6 +128,8 @@ pub struct TopologyPeer {
     pub address: String,
     /// The peer's Ed25519 public key, hex encoded.
     pub public_key: String,
+    /// The peer's ML-DSA-65 public key, hex encoded.
+    pub pq_public_key: String,
     /// The peer's UDP endpoint, when it has reported one.
     pub endpoint: Option<String>,
 }

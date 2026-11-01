@@ -9,7 +9,13 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 use zt_controller::auth::{AuthConfig, Verifier};
 use zt_controller::middleware::AuthState;
+use zt_controller::model::NodeKeys;
 use zt_controller::{router_with_auth, Actor, Controller, Deployment};
+
+/// A post-quantum public key for a test node.
+fn pq_public_key() -> Vec<u8> {
+    vec![7u8; 1952]
+}
 
 /// A controller with authentication enabled.
 fn authenticated() -> (axum::Router, Controller) {
@@ -61,7 +67,10 @@ async fn tenant_with_node(controller: &Controller) -> (String, String, String) {
             &tenant.id,
             &network.id,
             "web-01".into(),
-            [7u8; 32],
+            NodeKeys {
+                ed25519: [7u8; 32],
+                ml_dsa: pq_public_key(),
+            },
             Vec::new(),
             &Actor::system(),
         )

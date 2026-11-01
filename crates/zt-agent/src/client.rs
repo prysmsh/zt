@@ -100,6 +100,35 @@ struct NetworkList {
     items: Vec<NetworkInfo>,
 }
 
+/// A peer in the topology the controller hands a node.
+#[derive(Clone, Debug, Deserialize)]
+pub struct TopologyPeer {
+    /// The peer's address in the network's range.
+    pub address: String,
+    /// The peer's Ed25519 public key, hex encoded.
+    pub public_key: String,
+    /// The peer's ML-DSA-65 public key, hex encoded.
+    pub pq_public_key: String,
+    /// The peer's UDP endpoint, when it has reported one.
+    pub endpoint: Option<String>,
+}
+
+/// The topology the controller hands a node.
+///
+/// It holds the node's own address, the range it lives in, and the peers it
+/// shares the range with. Nothing about any other network.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Topology {
+    /// The node's own address in the network's range.
+    pub address: String,
+    /// The network's range, in the `10.42.0.0/24` form.
+    pub cidr: String,
+    /// The network's numeric identifier.
+    pub network_id: u64,
+    /// The peers in the same network.
+    pub peers: Vec<TopologyPeer>,
+}
+
 /// A minimal blocking HTTP client for the controller API.
 ///
 /// The node authenticates with the credential the controller issued it. The
@@ -208,15 +237,38 @@ impl ControllerClient {
         network_id: &str,
         name: &str,
         public_key: &str,
+        pq_public_key: &str,
         tags: &[String],
     ) -> Result<EnrollResponse> {
         let body = serde_json::json!({
             "network_id": network_id,
             "name": name,
             "public_key": public_key,
+            "pq_public_key": pq_public_key,
             "tags": tags,
         });
         self.post(&self.tenant_url("nodes"), &body)
+    }
+
+    /// Ask the controller for this node's topology.
+    ///
+    /// The topology is what a node needs to carry traffic: its own address
+    /// in the network's range, and the peers it shares the range with.
+    pub fn topology(&self) -> Result<Topology> {
+        self.get(&self.tenant_url("topology"))
+    }
+
+    /// Report how this node's peers reach it.
+    ///
+    /// The endpoint is where the node listens. The post-quantum key is the
+    /// one the node signs its handshakes with, which a peer needs to check
+    /// them.
+    pub fn report_presence(&self, endpoint: &str, pq_public_key: &str) -> Result<ControllerNode> {
+        let body = serde_json::json!({
+            "endpoint": endpoint,
+            "pq_public_key": pq_public_key,
+        });
+        self.post(&self.tenant_url("nodes/self/presence"), &body)
     }
 
     /// Ask the controller which node this credential belongs to.
@@ -250,11 +302,8 @@ impl ControllerClient {
     /// Revoke a node.
     pub fn revoke_node(&self, node_id: &str) -> Result<()> {
         let body = serde_json::json!({});
-        self.post::<serde_json::Value>(
-            &self.tenant_url(&format!("nodes/{node_id}/revoke")),
-            &body,
-        )
-        .map(|_| ())
+        self.post::<serde_json::Value>(&self.tenant_url(&format!("nodes/{node_id}/revoke")), &body)
+            .map(|_| ())
     }
 
     /// Send a GET request and decode the JSON response.

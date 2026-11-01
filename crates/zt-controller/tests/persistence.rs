@@ -1,7 +1,13 @@
 //! Tests for controller persistence and tenant isolation.
 
-use zt_controller::Actor;
 use std::sync::Arc;
+use zt_controller::model::NodeKeys;
+use zt_controller::Actor;
+
+/// A post-quantum public key for a test node.
+fn pq_public_key() -> Vec<u8> {
+    vec![7u8; 1952]
+}
 
 use zt_controller::{Controller, Deployment, IdentityStore, SqliteStore, TenantLimits};
 use zt_crypto::credential::ControllerIdentity;
@@ -51,7 +57,10 @@ async fn sqlite_store_round_trips_controller_state() {
             &tenant_id,
             &network.id,
             "web-01".into(),
-            node_public_key,
+            NodeKeys {
+                ed25519: node_public_key,
+                ml_dsa: pq_public_key(),
+            },
             vec!["web".into()],
             &Actor::system(),
         )
@@ -152,15 +161,21 @@ async fn node_status_survives_reload() {
         .await
         .expect("network");
     let (node, _) = controller
-        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![],
+        .enroll_node(
+            &tenant_id,
+            &network.id,
+            "node-1".into(),
+            NodeKeys {
+                ed25519: [1u8; 32],
+                ml_dsa: pq_public_key(),
+            },
+            vec![],
             &Actor::system(),
         )
         .await
         .expect("node");
     controller
-        .revoke_node(&tenant_id, &node.id,
-            &Actor::system(),
-        )
+        .revoke_node(&tenant_id, &node.id, &Actor::system())
         .await
         .expect("revoke");
 
@@ -187,16 +202,22 @@ async fn deleting_network_removes_scoped_objects() {
         .await
         .expect("network");
     controller
-        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![],
+        .enroll_node(
+            &tenant_id,
+            &network.id,
+            "node-1".into(),
+            NodeKeys {
+                ed25519: [1u8; 32],
+                ml_dsa: pq_public_key(),
+            },
+            vec![],
             &Actor::system(),
         )
         .await
         .expect("node");
 
     controller
-        .delete_network(&tenant_id, &network.id,
-            &Actor::system(),
-        )
+        .delete_network(&tenant_id, &network.id, &Actor::system())
         .await
         .expect("delete");
 
@@ -273,7 +294,10 @@ async fn state_survives_a_restart_using_the_same_database_file() {
             &tenant_id,
             "",
             "web-01".into(),
-            [4u8; 32],
+            NodeKeys {
+                ed25519: [4u8; 32],
+                ml_dsa: pq_public_key(),
+            },
             vec!["web".into()],
             &Actor::system(),
         )
