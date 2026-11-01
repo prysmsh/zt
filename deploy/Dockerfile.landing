@@ -22,6 +22,7 @@ RUN set -eu; \
         -e "s|/landing/fonts/jetbrains-mono.woff2|/landing/fonts/jetbrains-mono.${version}.woff2|g" \
         styles.css > "/usr/share/nginx/html/landing/styles.${version}.css"; \
     cp app.js "/usr/share/nginx/html/landing/app.${version}.js"; \
+    cp favicon.svg "/usr/share/nginx/html/favicon.svg"; \
     cp fonts/geist-pixel-grid.woff2 "/usr/share/nginx/html/landing/fonts/geist-pixel-grid.${version}.woff2"; \
     cp fonts/jetbrains-mono.woff2 "/usr/share/nginx/html/landing/fonts/jetbrains-mono.${version}.woff2"; \
     cp images/about-isometric.jpg "/usr/share/nginx/html/landing/images/about-isometric.${version}.jpg"; \
