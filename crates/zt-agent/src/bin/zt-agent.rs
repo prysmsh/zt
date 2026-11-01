@@ -13,8 +13,9 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
-use zt_agent::{Agent, AgentConfig, AgentError, Result};
+use zt_agent::{Agent, AgentConfig, AgentError, ControllerClient, Result};
 
 const USAGE: &str = "\
 zt-agent — ZT-next node agent
@@ -28,6 +29,7 @@ COMMANDS:
     renew      Renew the credential if it is due for renewal
     status     Show the node's enrollment and credential status
     identity   Print the node's public key and address
+    checkin    Tell the controller the node is here, and fetch the topology
     run        Carry traffic: open the interface and forward packets
 
 OPTIONS:
@@ -40,6 +42,7 @@ OPTIONS:
     --state <PATH>        Path to the node state file (default: zt-node.json)
     --interface <NAME>    Interface to open for the data plane (default: zt0)
     --listen <ADDR:PORT>  Address the node listens on (default: 0.0.0.0:9994)
+    --interval <SECONDS>  Repeat the check-in every so many seconds
     --force               Renew even when the credential is not yet due
     -h, --help            Print this help
 
@@ -83,6 +86,7 @@ struct Options {
     force: bool,
     interface: String,
     listen: String,
+    interval: Option<u64>,
 }
 
 /// Parse the command line.
@@ -99,6 +103,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
         force: false,
         interface: "zt0".to_string(),
         listen: "0.0.0.0:9994".to_string(),
+        interval: None,
     };
 
     let mut index = 0;
@@ -111,7 +116,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
             }
             "--force" => options.force = true,
             "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state"
-            | "--credential" | "--interface" | "--listen" => {
+            | "--credential" | "--interface" | "--listen" | "--interval" => {
                 index += 1;
                 let value = arguments
                     .get(index)
@@ -132,6 +137,11 @@ fn parse(arguments: &[String]) -> Result<Options> {
                     "--credential" => options.credential = Some(value.clone()),
                     "--interface" => options.interface = value.clone(),
                     "--listen" => options.listen = value.clone(),
+                    "--interval" => {
+                        options.interval = Some(value.parse().map_err(|_| {
+                            AgentError::Usage(format!("'{value}' is not a number of seconds"))
+                        })?)
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -174,6 +184,7 @@ fn run(arguments: &[String]) -> Result<String> {
         "renew" => renew(options, config),
         "status" => status(options, config),
         "identity" => identity(options, config),
+        "checkin" => checkin(options, config),
         "run" => run_data_plane(options, config),
         other => Err(AgentError::Usage(format!("unknown command {other}"))),
     }
@@ -326,6 +337,70 @@ fn identity(options: Options, config: AgentConfig) -> Result<String> {
     ))
 }
 
+/// Tell the controller the node is here.
+///
+/// A node that runs the control plane but not the data plane still has to
+/// tell the controller it is alive: the console shows a node as online
+/// while it keeps hearing from it, and a node that goes quiet is shown as
+/// offline.
+///
+/// The node reports the endpoint its peers would reach it at, and asks
+/// for the topology. With `--interval` it keeps doing so, which is what a
+/// node that only carries the control plane runs.
+fn checkin(options: Options, config: AgentConfig) -> Result<String> {
+    let agent = Agent::open(config)?;
+
+    let listen: std::net::SocketAddr = options
+        .listen
+        .parse()
+        .map_err(|_| AgentError::Usage(format!("'{}' is not an address", options.listen)))?;
+
+    // The endpoint is the address the node listens on. A node that only
+    // runs the control plane may not listen at all, in which case the
+    // address it would be reached at is still worth reporting.
+    let socket = std::net::UdpSocket::bind(listen)
+        .map_err(|error| AgentError::Io(format!("cannot listen: {error}")))?;
+    let endpoint = socket
+        .local_addr()
+        .map_err(|error| AgentError::Io(error.to_string()))?;
+
+    let pq_public_key = agent.state().pq_public_key_hex()?;
+    let client = agent.client().clone();
+
+    let report = |client: &ControllerClient| -> Result<usize> {
+        client.report_presence(&endpoint.to_string(), &pq_public_key)?;
+        Ok(0)
+    };
+
+    match options.interval {
+        Some(seconds) => loop {
+            report(&client)?;
+
+            let topology = client.topology()?;
+            println!(
+                "checked in as {} in {} ({} peers)",
+                topology.address,
+                topology.cidr,
+                topology.peers.len()
+            );
+
+            std::thread::sleep(Duration::from_secs(seconds.max(1)));
+        },
+        None => {
+            report(&client)?;
+
+            let topology = client.topology()?;
+            Ok(format!(
+                "Checked in as {} in {}\n  peers:   {}\n  state:   {}",
+                topology.address,
+                topology.cidr,
+                topology.peers.len(),
+                options.state.display(),
+            ))
+        }
+    }
+}
+
 /// Carry traffic.
 ///
 /// The node opens the virtual interface, tells the controller how its peers
@@ -357,11 +432,13 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
         agent.state().static_identity()?,
         agent.membership()?,
         agent.trust()?,
+        agent.state().pq_public_key_hex()?,
         runner_config,
     )?;
 
     // The controller needs to know where the peers can reach this node,
-    // and which post-quantum key they check its signature with.
+    // and which post-quantum key they check its signature with. The runner
+    // reports it on every refresh, so the node stays online.
     runner.report_presence(&agent.state().pq_public_key_hex()?)?;
 
     runner.run()?;

@@ -32,6 +32,31 @@ use crate::tenant::{
     exceeded_limit, new_tenant, Deployment, Tenant, TenantLimits, TenantStatus, TenantUsage,
 };
 
+/// How long a node may go without a sighting before it counts as offline.
+///
+/// A node checks in when it reports its presence or renews its
+/// credential. Both happen far more often than this, so a node that goes
+/// quiet inside the window has stopped talking to the controller.
+const NODE_ONLINE_WINDOW: u64 = 300;
+
+/// The status a node is in, as seen now.
+///
+/// A node that has never been seen is pending: it holds a credential but
+/// has not checked in. A node that was seen and has gone quiet is
+/// offline. The stored status settles the rest, because a revoked node
+/// stays revoked however recently it was seen.
+fn effective_status(node: &Node, now: u64) -> NodeStatus {
+    if node.status == NodeStatus::Revoked {
+        return NodeStatus::Revoked;
+    }
+
+    match node.last_seen {
+        None => NodeStatus::Pending,
+        Some(seen) if now.saturating_sub(seen) > NODE_ONLINE_WINDOW => NodeStatus::Offline,
+        Some(_) => NodeStatus::Online,
+    }
+}
+
 /// Default credential lifetime: 24 hours.
 pub const DEFAULT_CREDENTIAL_TTL_SECS: u32 = 24 * 60 * 60;
 
@@ -552,6 +577,8 @@ impl Controller {
 
     /// List nodes for a tenant, optionally scoped to a network.
     pub async fn list_nodes(&self, tenant_id: &str, network_id: Option<&str>) -> Vec<Node> {
+        let now = now_unix();
+
         self.inner
             .state
             .read()
@@ -561,12 +588,19 @@ impl Controller {
             .filter(|node| node.tenant_id == tenant_id)
             .filter(|node| network_id.map(|id| node.network_id == id).unwrap_or(true))
             .cloned()
+            .map(|mut node| {
+                node.status = effective_status(&node, now);
+                node
+            })
             .collect()
     }
 
     /// Get one node, scoped to a tenant.
     pub async fn get_node(&self, tenant_id: &str, id: &str) -> Result<Node> {
-        self.inner
+        let now = now_unix();
+
+        let node = self
+            .inner
             .state
             .read()
             .await
@@ -574,7 +608,12 @@ impl Controller {
             .get(id)
             .filter(|node| node.tenant_id == tenant_id)
             .cloned()
-            .ok_or(ControllerError::NotFound("node"))
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        Ok(Node {
+            status: effective_status(&node, now),
+            ..node
+        })
     }
 
     /// Find the node that a credential belongs to.
@@ -599,7 +638,10 @@ impl Controller {
     /// The principal is a node, identified by the subject the credential
     /// was issued for.
     pub async fn find_node_for_principal(&self, tenant_id: &str, subject: &str) -> Result<Node> {
-        self.inner
+        let now = now_unix();
+
+        let node = self
+            .inner
             .state
             .read()
             .await
@@ -607,7 +649,12 @@ impl Controller {
             .values()
             .find(|node| node.tenant_id == tenant_id && node.id == subject)
             .cloned()
-            .ok_or(ControllerError::NotFound("node"))
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        Ok(Node {
+            status: effective_status(&node, now),
+            ..node
+        })
     }
 
     /// The lowest address in a network's range that no node holds.
@@ -704,6 +751,9 @@ impl Controller {
 
         node.endpoint = Some(endpoint.to_string());
         node.last_seen = Some(now_unix());
+
+        // The node is talking to the controller, so it is online.
+        node.status = NodeStatus::Online;
 
         if !pq_public_key.is_empty() {
             node.pq_public_key = pq_public_key.to_string();
@@ -877,6 +927,11 @@ impl Controller {
         let node = state.nodes.get_mut(id).expect("node exists");
         node.credential_issued_at = issued_at;
         node.credential_not_after = credential.not_after();
+
+        // The node is talking to the controller, so it is online.
+        node.last_seen = Some(issued_at);
+        node.status = NodeStatus::Online;
+
         let renewed = node.clone();
         state.record_for_tenant(
             Some(tenant_id),

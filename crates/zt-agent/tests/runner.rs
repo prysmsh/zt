@@ -235,6 +235,7 @@ fn runner(agent: &Agent, queue: Queue) -> Runner {
         agent.state().static_identity().expect("identity"),
         agent.membership().expect("membership"),
         agent.trust().expect("trust"),
+        agent.state().pq_public_key_hex().expect("post-quantum key"),
         RunnerConfig {
             listen,
             ..Default::default()

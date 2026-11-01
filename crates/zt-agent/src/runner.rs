@@ -80,6 +80,11 @@ pub struct Runner {
     config: RunnerConfig,
     peers: BTreeMap<Ipv4Addr, PeerRoute>,
     last_refresh: Option<Instant>,
+    /// The node's post-quantum public key, hex encoded.
+    ///
+    /// The controller hands it out in the topology, and a peer needs it to
+    /// complete a handshake.
+    pq_public_key: String,
 }
 
 impl Runner {
@@ -93,6 +98,7 @@ impl Runner {
         identity: StaticIdentity,
         membership: Membership,
         trust: ControllerTrust,
+        pq_public_key: String,
         config: RunnerConfig,
     ) -> Result<Self> {
         let socket = std::net::UdpSocket::bind(config.listen)
@@ -121,6 +127,7 @@ impl Runner {
             config,
             peers: BTreeMap::new(),
             last_refresh: None,
+            pq_public_key,
         })
     }
 
@@ -274,6 +281,11 @@ impl Runner {
                 // A failure to refresh is not fatal: the runner keeps the
                 // topology it has and tries again on the next pass.
                 let _ = self.refresh_topology();
+
+                // The controller shows a node as online while it keeps
+                // hearing from it, so the presence is reported on every
+                // refresh rather than only at startup.
+                let _ = self.report_presence(&self.pq_public_key);
             }
 
             let _ = self.connect_peers();
