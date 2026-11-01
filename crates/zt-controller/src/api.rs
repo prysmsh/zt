@@ -97,6 +97,12 @@ fn build_router(controller: Controller) -> Router {
             "/api/v1/t/{tenant}/nodes/{id}",
             get(get_node).delete(revoke_node),
         )
+        // The console uses the POST form, which is friendlier behind
+        // proxies that make DELETE awkward.
+        .route(
+            "/api/v1/t/{tenant}/nodes/{id}/revoke",
+            post(revoke_node),
+        )
         // A node asks who it is, using the credential it was issued. This
         // is how a node learns its own identity without being told.
         .route("/api/v1/t/{tenant}/nodes/self", get(get_self))

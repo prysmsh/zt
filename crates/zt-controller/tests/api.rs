@@ -165,6 +165,70 @@ async fn enrolling_node_issues_verifiable_credential() {
 }
 
 #[tokio::test]
+async fn joining_by_request_approving_and_revoking_works_over_http() {
+    let app = app();
+    let tenant_id = tenant(&app, "Acme").await;
+    let network = network(&app, &tenant_id, "Production", "10.42.0.0/24").await;
+
+    // The client asks to join. No token.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/join")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "tenant_slug": "acme",
+                        "network_id": network["id"],
+                        "name": "laptop-01",
+                        "public_key": "bb".repeat(32),
+                        "pq_public_key": hex::encode(vec![7u8; 1952])
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let node = json_body(response).await;
+    let node_id = node["id"].as_str().unwrap().to_string();
+
+    // The operator approves it through the console's route.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{node_id}/approve"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let approved = json_body(response).await;
+    assert_eq!(approved["id"], node["id"].as_str().unwrap());
+
+    // The console revokes through the POST form.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{node_id}/revoke"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let revoked = json_body(response).await;
+    assert_eq!(revoked["status"], "revoked");
+}
+
+#[tokio::test]
 async fn enrollment_rejects_invalid_public_key() {
     let app = app();
     let tenant = tenant(&app, "Acme").await;
