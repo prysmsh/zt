@@ -378,6 +378,28 @@ docker compose up -d
 
 Every node must then re-enroll.
 
+## The admin console's grants, in the fork
+
+The fork grants the admin console consent for the Cloud API and the Me
+API in a database alteration, and that alteration names the origins of
+one deployment directly. On any other deployment the console is granted
+consent for resources the instance does not serve, so its request for
+the Cloud API matches nothing: it lists no tenants and says the
+operator's roles are wrong.
+
+The alteration is also one-time, so a deployment that moves its admin
+endpoint afterwards cannot be fixed by re-running it — the indicators
+the resources carry came from the seed, and the alteration that re-points
+them only matches a legacy fixed host.
+
+`deploy/verity/patches/` has the fix for the fork: a new alteration that
+takes the indicators from the admin endpoint the instance is running on
+and matches the resources by name, and a script that does the same
+statements on every start, so a later move is picked up.
+
+`deploy/verity/grant-console-cloud-api.sql` is the deployment's own
+remedy for a database that was seeded before the admin endpoint settled.
+
 ## Settle the admin endpoint before the provider's first start
 
 The provider seeds a **Cloud API** resource whose indicator is the admin
