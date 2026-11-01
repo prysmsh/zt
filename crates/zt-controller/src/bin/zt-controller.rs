@@ -120,6 +120,7 @@ async fn auth_state(controller: &Controller) -> Result<Option<AuthState>, Box<dy
     tracing::info!(issuer = %issuer, audience = %audience, jwks = %jwks_uri, "OIDC configured");
 
     Ok(Some(AuthState {
+            limiter: zt_controller::middleware::RateLimiter::new(),
         verifier: Arc::new(Verifier::new(config)),
         controller: controller.clone(),
         tenant_scope,

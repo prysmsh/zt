@@ -42,6 +42,7 @@ impl TestController {
         // credential is what identifies it. The verifier points nowhere,
         // so no provider token is accepted.
         let state = zt_controller::AuthState {
+            limiter: zt_controller::middleware::RateLimiter::new(),
             verifier: std::sync::Arc::new(zt_controller::Verifier::new(
                 zt_controller::AuthConfig::new(
                     "https://issuer.invalid",

@@ -124,6 +124,7 @@ async fn authenticated_app() -> (axum::Router, TestKeys, Controller) {
     let controller = Controller::new().expect("controller");
 
     let state = AuthState {
+        limiter: zt_controller::middleware::RateLimiter::new(),
         controller: controller.clone(),
         verifier,
         tenant_scope: "zt:tenant".to_string(),

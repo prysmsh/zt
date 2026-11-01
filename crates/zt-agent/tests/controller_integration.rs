@@ -39,6 +39,7 @@ impl TestController {
         let controller = Controller::with_store(identity, store).expect("controller");
 
         let state = zt_controller::AuthState {
+            limiter: zt_controller::middleware::RateLimiter::new(),
             // The verifier points nowhere, so no provider token is accepted.
             verifier: std::sync::Arc::new(zt_controller::Verifier::new(
                 zt_controller::AuthConfig::new(

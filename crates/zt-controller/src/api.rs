@@ -122,8 +122,8 @@ fn now_unix() -> u64 {
 }
 
 #[derive(Debug, Serialize)]
-struct ErrorBody {
-    error: String,
+pub struct ErrorBody {
+    pub error: String,
 }
 
 impl IntoResponse for ControllerError {
@@ -402,15 +402,31 @@ struct NodeList {
     total: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct ListQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: usize,
+}
+
 async fn list_nodes(
     State(controller): State<Controller>,
     Path(tenant): Path<String>,
     Query(query): Query<NetworkQuery>,
+    Query(page): Query<ListQuery>,
 ) -> Result<Json<NodeList>, ControllerError> {
-    let items = controller
+    let all = controller
         .list_nodes(&tenant, query.network.as_deref())
         .await;
-    let total = items.len();
+    let total = all.len();
+
+    let items = all
+        .into_iter()
+        .skip(page.offset)
+        .take(page.limit.unwrap_or(500))
+        .collect();
+
     Ok(Json(NodeList { items, total }))
 }
 
@@ -610,11 +626,19 @@ async fn list_policies(
     State(controller): State<Controller>,
     Path(tenant): Path<String>,
     Query(query): Query<NetworkQuery>,
+    Query(page): Query<ListQuery>,
 ) -> Result<Json<PolicyList>, ControllerError> {
-    let items = controller
+    let all = controller
         .list_policies(&tenant, query.network.as_deref())
         .await;
-    let total = items.len();
+    let total = all.len();
+
+    let items = all
+        .into_iter()
+        .skip(page.offset)
+        .take(page.limit.unwrap_or(500))
+        .collect();
+
     Ok(Json(PolicyList { items, total }))
 }
 

@@ -30,7 +30,7 @@ fn authenticated() -> (axum::Router, Controller) {
         ))),
         controller: controller.clone(),
         tenant_scope: "zt:tenant".into(),
-        operator_scope: "zt:operator".into(),
+        operator_scope: "zt:operator".into(),        limiter: zt_controller::middleware::RateLimiter::new(),
     };
 
     (router_with_auth(controller.clone(), state), controller)

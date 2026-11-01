@@ -34,7 +34,7 @@ async fn fixture() -> Fixture {
         ))),
         controller: controller.clone(),
         tenant_scope: "zt:tenant".into(),
-        operator_scope: "zt:operator".into(),
+        operator_scope: "zt:operator".into(),        limiter: zt_controller::middleware::RateLimiter::new(),
     };
 
     Fixture {

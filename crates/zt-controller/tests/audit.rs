@@ -117,7 +117,7 @@ async fn a_request_without_an_identity_is_attributed_to_anonymous() {
             "https://issuer.test/jwks",
         ))),
         tenant_scope: "zt:tenant".into(),
-        operator_scope: "zt:operator".into(),
+        operator_scope: "zt:operator".into(),        limiter: zt_controller::middleware::RateLimiter::new(),
     };
     let app = router_with_auth(controller, state);
 

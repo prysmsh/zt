@@ -132,16 +132,22 @@ export function EnrollNodeDialog({
   networks,
   onClose,
   onEnrolled,
+  presetName,
+  presetTags,
 }: {
   api: ApiClient
   networks: Network[]
   onClose: () => void
   onEnrolled: (result: EnrollNodeResult) => void
+  /** The name the operator is offered, when the node has a fixed role. */
+  presetName?: string
+  /** The tags the node carries, when its role fixes them. */
+  presetTags?: string[]
 }) {
-  const [name, setName] = useState('')
+  const [name, setName] = useState(presetName ?? '')
   const [networkId, setNetworkId] = useState(networks[0]?.id ?? '')
   const [publicKey, setPublicKey] = useState('')
-  const [tags, setTags] = useState('')
+  const [tags, setTags] = useState((presetTags ?? []).join(','))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

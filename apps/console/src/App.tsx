@@ -679,9 +679,18 @@ function PoliciesPage({ data }: { data: ControllerSnapshot }) {
   )
 }
 
-function RelaysPage({ data }: { data: ControllerSnapshot }) {
+function RelaysPage({
+  data,
+  api,
+  onChanged,
+}: {
+  data: ControllerSnapshot
+  api: ApiClient
+  onChanged: () => void
+}) {
   const healthy = data.relays.filter((relay) => relay.status === 'healthy').length
   const draining = data.relays.filter((relay) => relay.status === 'draining').length
+  const [enrolling, setEnrolling] = useState(false)
 
   return (
     <>
@@ -694,12 +703,25 @@ function RelaysPage({ data }: { data: ControllerSnapshot }) {
           </p>
         </div>
         <div className="head-actions">
-          <button type="button" className="button primary">
+          <button type="button" className="button primary" onClick={() => setEnrolling(true)}>
             <Plus size={15} />
             Add relay
           </button>
         </div>
       </div>
+      {enrolling ? (
+        <EnrollNodeDialog
+          api={api}
+          networks={useNetworkSummaries(data)}
+          presetName="relay"
+          presetTags={['relay', 'public']}
+          onClose={() => setEnrolling(false)}
+          onEnrolled={() => {
+            setEnrolling(false)
+            onChanged()
+          }}
+        />
+      ) : null}
       <div className="stats">
         <div className="stat-card">
           <div className="stat-label">Healthy relays</div>
@@ -879,7 +901,7 @@ export default function App() {
     ) : page === 'policies' ? (
       <PoliciesPage data={data} />
     ) : page === 'relays' ? (
-      <RelaysPage data={data} />
+      <RelaysPage data={data} api={api} onChanged={refresh} />
     ) : (
       <ActivityPage data={data} />
     )

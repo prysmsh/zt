@@ -20,6 +20,7 @@ pub mod identity;
 pub mod middleware;
 pub mod model;
 pub mod principal;
+pub mod retention;
 pub mod service;
 pub mod store;
 pub mod tenant;

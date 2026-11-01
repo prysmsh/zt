@@ -12,11 +12,13 @@
 //! cannot accidentally forget to check, because the middleware runs first
 //! and rejects the request before the handler sees it.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
+use std::time::Duration;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
@@ -25,8 +27,52 @@ use crate::auth::{bearer_token, AuthError, Identity, Verifier};
 use crate::service::Controller;
 
 /// The shared state the middleware needs.
+/// How many requests a token may make in a second.
+const RATE_LIMIT_PER_SECOND: u32 = 100;
+
+/// A fixed-window rate limiter keyed by the caller's token.
+///
+/// In-memory on purpose: the controller is one process, and a rate limit
+/// that survives a restart would need shared state the controller does
+/// not have. A deployment that needs more than this puts a limiter in
+/// front, which is where it belongs.
+#[derive(Clone)]
+pub struct RateLimiter {
+    window: Arc<Mutex<HashMap<String, (u32, std::time::Instant)>>>,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self {
+            window: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Whether a caller may make another request now.
+    ///
+    /// The key is whatever identifies the caller: its token's subject, or
+    /// its address when it has no token.
+    pub fn allows(&self, key: &str, limit: u32) -> bool {
+        let mut window = self.window.lock().expect("rate limiter poisoned");
+        let now = std::time::Instant::now();
+
+        let entry = window.entry(key.to_string()).or_insert((0, now));
+
+        // The window is a second. When it has elapsed, the count restarts.
+        if now.duration_since(entry.1) >= Duration::from_secs(1) {
+            *entry = (1, now);
+            return true;
+        }
+
+        entry.0 += 1;
+        entry.0 <= limit
+    }
+}
+
 #[derive(Clone)]
 pub struct AuthState {
+    /// The rate limiter, shared by every request.
+    pub limiter: RateLimiter,
     /// The token verifier.
     pub verifier: Arc<Verifier>,
     /// The controller, which verifies a node's own credential.
@@ -125,6 +171,15 @@ pub async fn require_auth(
     ) else {
         return AuthRejection::from(AuthError::Missing).into_response();
     };
+
+    // The limit is per token, so one tenant cannot consume the controller's
+    // capacity and starve the others. The controller's own health probe is
+    // exempt, because it has no token at all.
+    if !state.limiter.allows(token, RATE_LIMIT_PER_SECOND) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(crate::api::ErrorBody {
+            error: "rate limited".into(),
+        })).into_response();
+    }
 
     // A node authenticates with the credential the controller issued it.
     // The credential is signed by this controller and bound to the node's

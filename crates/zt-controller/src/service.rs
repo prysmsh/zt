@@ -94,6 +94,19 @@ impl Controller {
     /// Existing state is loaded from the store at startup. The signing
     /// identity is provided by the caller so that it can be persisted
     /// separately from the operational data.
+    pub fn with_store_and_retention(
+        identity: ControllerIdentity,
+        store: Arc<dyn Store>,
+        policy: crate::retention::Retention,
+    ) -> Result<Self> {
+        let controller = Self::with_store(identity, store.clone())?;
+
+        // The retention job runs forever on its own task.
+        tokio::spawn(crate::retention::run_forever(store, policy));
+
+        Ok(controller)
+    }
+
     pub fn with_store(identity: ControllerIdentity, store: Arc<dyn Store>) -> Result<Self> {
         let mut state = store.load()?;
 

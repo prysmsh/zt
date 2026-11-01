@@ -23,6 +23,7 @@ struct Fixture {
 async fn fixture() -> Fixture {
     let controller = Controller::new().expect("controller");
     let state = AuthState {
+        limiter: zt_controller::middleware::RateLimiter::new(),
         verifier: std::sync::Arc::new(Verifier::new(AuthConfig::new(
             "https://issuer.test",
             "https://audience.test",

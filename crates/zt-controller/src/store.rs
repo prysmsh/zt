@@ -20,6 +20,13 @@ pub trait Store: Send + Sync + 'static {
 
     /// Persist the full controller state.
     fn save(&self, state: &ControllerState) -> Result<()>;
+
+    /// Purge the data of tenants soft-deleted before `before` (Unix
+    /// seconds), and report how many were purged.
+    fn purge_deleted_tenants(&self, before: i64) -> Result<usize>;
+
+    /// Drop the usage samples recorded before `before` (Unix seconds).
+    fn prune_usage_samples(&self, before: i64) -> Result<()>;
 }
 
 /// In-memory store, used for tests and ephemeral deployments.
@@ -43,6 +50,14 @@ impl Store for MemoryStore {
     fn save(&self, state: &ControllerState) -> Result<()> {
         let mut stored = self.state.lock().expect("controller state poisoned");
         *stored = state.clone();
+        Ok(())
+    }
+
+    fn purge_deleted_tenants(&self, _before: i64) -> Result<usize> {
+        Ok(0)
+    }
+
+    fn prune_usage_samples(&self, _before: i64) -> Result<()> {
         Ok(())
     }
 }
@@ -302,6 +317,21 @@ impl SqliteStore {
         Ok(rows)
     }
 
+    fn purge_deleted_tenants(&self, before: i64) -> Result<usize> {
+        let connection = self.connection.lock().expect("connection poisoned");
+        let purged = connection.execute(
+            "DELETE FROM tenants WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            [before],
+        )?;
+        Ok(purged as usize)
+    }
+
+    fn prune_usage_samples(&self, before: i64) -> Result<()> {
+        let connection = self.connection.lock().expect("connection poisoned");
+        connection.execute("DELETE FROM usage_samples WHERE recorded_at < ?1", [before])?;
+        Ok(())
+    }
+
     fn load_usage_samples(&self, connection: &Connection) -> Result<Vec<UsageSample>> {
         let mut statement = connection.prepare(
             "SELECT id, tenant_id, node_id, recorded_at, nodes, bytes_in, bytes_out, packets
@@ -471,6 +501,21 @@ impl SqliteStore {
 }
 
 impl Store for SqliteStore {
+    fn purge_deleted_tenants(&self, before: i64) -> Result<usize> {
+        let connection = self.connection.lock().expect("connection poisoned");
+        let purged = connection.execute(
+            "DELETE FROM tenants WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            [before],
+        )?;
+        Ok(purged as usize)
+    }
+
+    fn prune_usage_samples(&self, before: i64) -> Result<()> {
+        let connection = self.connection.lock().expect("connection poisoned");
+        connection.execute("DELETE FROM usage_samples WHERE recorded_at < ?1", [before])?;
+        Ok(())
+    }
+
     fn load(&self) -> Result<ControllerState> {
         let connection = self.connection.lock().expect("connection poisoned");
         Ok(ControllerState {
