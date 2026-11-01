@@ -80,9 +80,18 @@ fn build_router(controller: Controller) -> Router {
             get(list_networks).post(create_network),
         )
         .route("/api/v1/t/{tenant}/networks/{id}", delete(delete_network))
+        // A client asks to join a network. No token is required: the node
+        // stays in pending until the operator approves it, which is where
+        // the security lives.
+        .route("/api/v1/join", post(join_network))
+        .route("/api/v1/join/{node_id}/poll", post(poll_join))
         .route(
             "/api/v1/t/{tenant}/nodes",
             get(list_nodes).post(enroll_node),
+        )
+        .route(
+            "/api/v1/t/{tenant}/nodes/{id}/approve",
+            post(approve_node),
         )
         .route(
             "/api/v1/t/{tenant}/nodes/{id}",
@@ -317,6 +326,88 @@ async fn my_endpoint(
 }
 
 /// What a tenant owes for the period that contains today.
+#[derive(Debug, Deserialize)]
+struct JoinRequest {
+    tenant_slug: String,
+    network_id: String,
+    name: String,
+    /// Hex-encoded Ed25519 public key.
+    public_key: String,
+    /// Hex-encoded ML-DSA-65 public key.
+    #[serde(default)]
+    pq_public_key: String,
+}
+
+/// A client asks to join a network. No token is required: the node stays
+/// in pending until the operator approves it, which is where the security
+/// lives. The operator sees the pending node in the console and decides.
+async fn join_network(
+    State(controller): State<Controller>,
+    Json(request): Json<JoinRequest>,
+) -> Result<(StatusCode, Json<crate::model::Node>), ControllerError> {
+    let tenant = controller
+        .find_tenant_by_slug(&request.tenant_slug)
+        .await?;
+
+    let ed25519 = hex::decode(&request.public_key)
+        .map_err(|_| ControllerError::InvalidRequest("public_key must be hex encoded".into()))?;
+    let ed25519: [u8; 32] = ed25519.try_into().map_err(|_| {
+        ControllerError::InvalidRequest("public_key must be exactly 32 bytes".into())
+    })?;
+
+    let pq_public_key = hex::decode(&request.pq_public_key)
+        .map_err(|_| ControllerError::InvalidRequest("pq_public_key must be hex encoded".into()))?;
+
+    let node = controller
+        .join_node(
+            &tenant.id,
+            &request.network_id,
+            request.name,
+            NodeKeys { ed25519, ml_dsa: pq_public_key },
+        )
+        .await?;
+
+    Ok((StatusCode::CREATED, Json(node)))
+}
+
+/// A pending node asks whether the operator has approved it yet.
+///
+/// The request carries a signature over the node's identifier, made with
+/// the key the node joined with. Only the holder of that key can collect
+/// the credential, so approval never has to hand a secret to the console.
+#[derive(Debug, Deserialize)]
+struct JoinPollRequest {
+    /// Hex-encoded Ed25519 signature over `zt-next-join-poll:{node_id}`.
+    signature: String,
+}
+
+async fn poll_join(
+    State(controller): State<Controller>,
+    Path(node_id): Path<String>,
+    Json(request): Json<JoinPollRequest>,
+) -> Result<Json<crate::service::JoinPoll>, ControllerError> {
+    let signature = hex::decode(&request.signature)
+        .map_err(|_| ControllerError::InvalidRequest("signature must be hex encoded".into()))?;
+
+    let poll = controller.poll_join(&node_id, &signature).await?;
+    Ok(Json(poll))
+}
+
+/// The operator approves a pending node, which marks it as a member. The
+/// node collects its credential itself, by polling with a signature, so
+/// the console never has to carry a secret.
+async fn approve_node(
+    State(controller): State<Controller>,
+    principal: Principal,
+    Path(tenant): Path<String>,
+    axum::extract::Path(node_id): axum::extract::Path<String>,
+) -> Result<Json<crate::model::Node>, ControllerError> {
+    let (node, _credential) = controller
+        .approve_node(&tenant, &node_id, &principal.actor())
+        .await?;
+    Ok(Json(node))
+}
+
 async fn tenant_billing(
     State(controller): State<Controller>,
     Path(tenant): Path<String>,

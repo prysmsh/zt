@@ -46,6 +46,10 @@ pub struct ControllerNode {
     pub address: String,
     pub status: String,
     pub credential_not_after: u64,
+    /// The tenant the node belongs to. A join response carries it, so a
+    /// node that joined by slug learns the identifier the API uses.
+    #[serde(default)]
+    pub tenant_id: String,
 }
 
 /// The result of enrolling a node.
@@ -55,6 +59,22 @@ pub struct EnrollResponse {
     /// The credential, hex encoded. Shown once.
     pub credential: String,
     pub credential_not_after: u64,
+}
+
+/// The answer to a pending node's poll for its credential.
+#[derive(Clone, Debug, Deserialize)]
+pub enum JoinPoll {
+    /// The operator has not approved the node yet.
+    Pending,
+    /// The node was approved, and the credential is ready to adopt.
+    Approved {
+        /// The credential, hex encoded.
+        credential: String,
+        /// The network's identifier.
+        network_id: u64,
+        /// The node's address in the network, hex encoded.
+        address: String,
+    },
 }
 
 /// Information about the controller itself.
@@ -257,6 +277,41 @@ impl ControllerClient {
             "tags": tags,
         });
         self.post(&self.tenant_url("nodes"), &body)
+    }
+
+    /// Ask to join a network, without a credential.
+    ///
+    /// The node is created in the pending state. It can do nothing until
+    /// the operator approves it, at which point it collects a credential
+    /// by polling with a signature.
+    pub fn join_network(
+        &self,
+        tenant_slug: &str,
+        network_id: &str,
+        name: &str,
+        public_key: &str,
+        pq_public_key: &str,
+    ) -> Result<ControllerNode> {
+        let body = serde_json::json!({
+            "tenant_slug": tenant_slug,
+            "network_id": network_id,
+            "name": name,
+            "public_key": public_key,
+            "pq_public_key": pq_public_key,
+        });
+        self.post(&format!("{}/api/v1/join", self.base_url), &body)
+    }
+
+    /// Poll for the credential a pending node was promised.
+    ///
+    /// The signature proves the caller holds the key it joined with: the
+    /// controller checks it before it hands anything out.
+    pub fn poll_join(&self, node_id: &str, signature_hex: &str) -> Result<JoinPoll> {
+        let body = serde_json::json!({ "signature": signature_hex });
+        self.post(
+            &format!("{}/api/v1/join/{node_id}/poll", self.base_url),
+            &body,
+        )
     }
 
     /// Ask the controller for this node's topology.

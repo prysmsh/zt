@@ -363,6 +363,14 @@ export function createFixtureClient(): ApiClient {
       const node = controllerNodes.find((item) => item.id === nodeId)
       if (node) node.status = 'revoked'
     },
+    async approveNode(nodeId) {
+      await delay()
+      const node = controllerNodes.find((item) => item.id === nodeId)
+      if (!node) throw new Error('node not found')
+      node.status = 'pending'
+      node.credential_not_after = Math.floor(Date.now() / 1000) + 86400
+      return mapNode(node)
+    },
     async renewCredential(nodeId) {
       await delay()
       const node = controllerNodes.find((item) => item.id === nodeId)

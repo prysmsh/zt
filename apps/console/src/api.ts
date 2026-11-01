@@ -109,6 +109,8 @@ export interface ApiClient {
   createNetwork(input: CreateNetworkInput): Promise<Network>
   enrollNode(input: EnrollNodeInput): Promise<EnrollNodeResult>
   revokeNode(nodeId: string): Promise<void>
+  /** Approve a pending node, which lets it collect its credential. */
+  approveNode(nodeId: string): Promise<MeshNode>
   renewCredential(nodeId: string): Promise<EnrollNodeResult>
   deletePolicy(policyId: string): Promise<void>
   createPolicy(input: CreatePolicyInput): Promise<Policy>
@@ -285,6 +287,13 @@ export function createHttpClient(
     },
     async revokeNode(nodeId) {
       await request<void>(`${tenantBase}/nodes/${encodeURIComponent(nodeId)}/revoke`, { method: 'POST' })
+    },
+    async approveNode(nodeId) {
+      const result = await request<{ node: ControllerNode }>(
+        `${tenantBase}/nodes/${encodeURIComponent(nodeId)}/approve`,
+        { method: 'POST' },
+      )
+      return mapNode(result.node)
     },
     async renewCredential(nodeId) {
       const result = await request<{

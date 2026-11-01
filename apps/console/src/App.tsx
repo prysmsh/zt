@@ -188,9 +188,12 @@ function NetworkRows({ items, onOpen }: { items: Network[]; onOpen?: (network: N
 function NodeTable({
   items,
   onOpen,
+  onApprove,
 }: {
   items: MeshNode[]
   onOpen?: (node: MeshNode) => void
+  /** Approve a pending node. Omitted where approval makes no sense. */
+  onApprove?: (node: MeshNode) => void
 }) {
   return (
     <div className="table-wrap">
@@ -203,6 +206,7 @@ function NodeTable({
             <th>Last seen</th>
             <th>Credential</th>
             <th>Platform</th>
+            {onApprove ? <th aria-label="Actions" /> : null}
           </tr>
         </thead>
         <tbody>
@@ -227,6 +231,22 @@ function NodeTable({
               <td>{node.lastSeen}</td>
               <td>{node.credentialExpires}</td>
               <td>{node.platform}</td>
+              {onApprove ? (
+                <td>
+                  {node.status === 'pending' ? (
+                    <button
+                      type="button"
+                      className="button primary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onApprove(node)
+                      }}
+                    >
+                      Approve
+                    </button>
+                  ) : null}
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -492,13 +512,23 @@ function NodesPage({
   )
   const scopeName = scope ? networks.find((network) => network.id === scope)?.name : undefined
 
+  const handleApprove = async (node: MeshNode) => {
+    setBusy(true)
+    try {
+      await api.approveNode(node.id)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <div className="page-head">
         <div>
           <div className="eyebrow">Fleet / {data.nodes.length} enrolled</div>
           <h1>Nodes</h1>
-          <p className="page-description">Enrollment, connectivity, and credential lifecycle.</p>
+          <p className="page-description">Enrollment, approval, connectivity, and credential lifecycle.</p>
         </div>
         <div className="head-actions">
           <button type="button" className="button primary" onClick={() => setEnrolling(true)}>
@@ -546,7 +576,7 @@ function NodesPage({
             }
           />
         ) : (
-          <NodeTable items={filtered} onOpen={setSelected} />
+          <NodeTable items={filtered} onOpen={setSelected} onApprove={handleApprove} />
         )}
       </section>
       {selected ? (

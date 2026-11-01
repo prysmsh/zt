@@ -184,6 +184,7 @@ fn run(arguments: &[String]) -> Result<String> {
 
     match options.command.as_str() {
         "enroll" => enroll(options, config),
+        "join" => join(options, config),
         "adopt" => adopt(options, config),
         "renew" => renew(options, config),
         "status" => status(options, config),
@@ -216,6 +217,52 @@ fn enroll(options: Options, config: AgentConfig) -> Result<String> {
         response.node.id,
         response.node.address,
         timestamp(response.credential_not_after),
+        options.state.display(),
+    ))
+}
+
+/// Ask to join a network and wait for the operator to approve it.
+///
+/// This is the flow that needs nothing from the operator up front: the
+/// host asks to join, the operator clicks Approve in the console, and the
+/// host picks up its credential on its next poll.
+fn join(options: Options, config: AgentConfig) -> Result<String> {
+    if options.tenant.is_empty() {
+        return Err(AgentError::Usage("--tenant is required to join".into()));
+    }
+    if options.network.is_empty() {
+        return Err(AgentError::Usage("--network is required to join".into()));
+    }
+    if options.name.is_empty() {
+        return Err(AgentError::Usage("--name is required to join".into()));
+    }
+
+    // The join endpoint takes the slug, so the agent skips the
+    // operator-scoped tenant resolution entirely.
+    let mut config = config;
+    config.tenant = String::new();
+
+    let mut agent = Agent::open(config)?;
+
+    eprintln!(
+        "Asked to join {} — waiting for the operator to approve it in the console...",
+        options.tenant
+    );
+
+    // Five minutes is enough time to open the console and click. The node
+    // stays pending afterwards, so nothing is lost by timing out.
+    let node = agent.join(
+        &options.tenant,
+        &options.name,
+        std::time::Duration::from_secs(300),
+    )?;
+
+    Ok(format!(
+        "Joined {} in network {}\n  node id:   {}\n  address:   {}\n  state:     {}",
+        node.name,
+        node.network_id,
+        node.id,
+        node.address,
         options.state.display(),
     ))
 }

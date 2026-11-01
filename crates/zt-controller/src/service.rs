@@ -33,6 +33,22 @@ use crate::tenant::{
     TenantStatus, TenantUsage, UsageSummary, Proration, ProrationPeriod,
 };
 
+/// The answer to a pending node's poll for its credential.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum JoinPoll {
+    /// The operator has not approved the node yet.
+    Pending,
+    /// The node was approved, and here is the credential that was promised.
+    Approved {
+        /// The credential, hex encoded. The node adopts it as its own.
+        credential: String,
+        /// The network's identifier, which the node stores as its home.
+        network_id: u64,
+        /// The node's address in the network, hex encoded.
+        address: String,
+    },
+}
+
 /// How long a node may go without a sighting before it counts as offline.
 ///
 /// A node checks in when it reports its presence or renews its
@@ -745,6 +761,19 @@ impl Controller {
     /// A node is told its own address, the range it lives in, and the
     /// peers it shares the range with. It is told nothing about any other
     /// network or tenant.
+    /// Find a tenant by its slug, which is what a join request carries.
+    pub async fn find_tenant_by_slug(&self, slug: &str) -> Result<crate::tenant::Tenant> {
+        self.inner
+            .state
+            .read()
+            .await
+            .tenants
+            .values()
+            .find(|tenant| tenant.slug == slug)
+            .cloned()
+            .ok_or(ControllerError::NotFound("tenant"))
+    }
+
     pub async fn topology_for(&self, tenant_id: &str, node_id: &str) -> Result<Topology> {
         let state = self.inner.state.read().await;
 
@@ -933,6 +962,192 @@ impl Controller {
         let node = node.clone();
         self.persist(&state).await?;
         Ok(node)
+    }
+
+    /// A client asks to join a network.
+    ///
+    /// Anyone who knows the tenant slug and the network identifier can
+    /// ask. The node is created without a credential, which means it
+    /// cannot do anything until the operator approves it. The security is
+    /// in the approval, not in the join.
+    pub async fn join_node(
+        &self,
+        tenant_id: &str,
+        network_id: &str,
+        name: String,
+        keys: NodeKeys,
+    ) -> Result<Node> {
+        let mut state = self.inner.state.write().await;
+
+        let network = state
+            .networks
+            .get(network_id)
+            .filter(|network| network.tenant_id == tenant_id)
+            .cloned()
+            .ok_or(ControllerError::NotFound("network"))?;
+
+        if state.nodes.values().any(|node| {
+            node.tenant_id == tenant_id && node.name == name && node.status != NodeStatus::Revoked
+        }) {
+            return Err(ControllerError::Conflict(
+                "node name already exists".to_string(),
+            ));
+        }
+
+        let address = Address::derive(network.network_id, &keys.ed25519);
+        let ipv4_address = self.assign_ipv4_address(&network, &state)?;
+        let fingerprint = fingerprint(&keys.ed25519);
+
+        let node = Node {
+            id: uuid::Uuid::new_v4().to_string(),
+            tenant_id: tenant_id.to_string(),
+            network_id: network.id.clone(),
+            name,
+            address: address.to_hex(),
+            ipv4_address,
+            endpoint: None,
+            public_key: hex::encode(keys.ed25519),
+            pq_public_key: hex::encode(&keys.ml_dsa),
+            relay: false,
+            fingerprint,
+            tags: Vec::new(),
+            platform: None,
+            version: None,
+            status: NodeStatus::Pending,
+            credential_issued_at: 0,
+            credential_not_after: 0,
+            last_seen: None,
+            created_at: now_unix(),
+        };
+
+        state.nodes.insert(node.id.clone(), node.clone());
+        self.persist(&state).await?;
+        Ok(node)
+    }
+
+    /// Approve a pending node and issue its credential.
+    ///
+    /// The operator sees the node in the console and decides whether it
+    /// belongs. Approving is what turns the node from a request into a
+    /// member of the mesh.
+    pub async fn approve_node(
+        &self,
+        tenant_id: &str,
+        node_id: &str,
+        actor: &Actor,
+    ) -> Result<(Node, NodeCredential)> {
+        let mut state = self.inner.state.write().await;
+        let network = {
+            let node = state
+                .nodes
+                .get(node_id)
+                .filter(|node| node.tenant_id == tenant_id)
+                .ok_or(ControllerError::NotFound("node"))?;
+            state
+                .networks
+                .get(&node.network_id)
+                .cloned()
+                .ok_or(ControllerError::NotFound("network"))?
+        };
+
+        let node = state.nodes.get_mut(node_id).expect("node exists");
+        node.credential_issued_at = now_unix();
+
+        let approved = node.clone();
+        state.record_for_tenant(
+            Some(tenant_id),
+            "node.approved",
+            "node",
+            node_id,
+            actor.display(),
+            format!("Approved {}", approved.name),
+        );
+        self.persist(&state).await?;
+
+        // The credential is issued here and shown to nobody: the node
+        // collects its own when it next polls with a valid signature.
+        let credential = self.issue_for_node(&approved, &network)?;
+        Ok((approved, credential))
+    }
+
+    /// A pending node polls for its credential.
+    ///
+    /// The node signs the poll request with the key it joined with, which
+    /// proves it holds the private half. Until the operator approves it,
+    /// the poll answers "pending". After approval it issues the credential
+    /// that was promised, bound to the key that signed the poll.
+    pub async fn poll_join(&self, node_id: &str, signature: &[u8]) -> Result<JoinPoll> {
+        let state = self.inner.state.read().await;
+
+        let node = state
+            .nodes
+            .get(node_id)
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        let mut message = b"zt-next-join-poll:".to_vec();
+        message.extend_from_slice(node_id.as_bytes());
+
+        let public_key: [u8; 32] = hex::decode(&node.public_key)
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .ok_or_else(|| ControllerError::InvalidRequest("node public key is invalid".into()))?;
+
+        let signature: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| ControllerError::InvalidRequest("signature must be 64 bytes".into()))?;
+
+        zt_crypto::identity::Identity::verify(&public_key, &message, &signature).map_err(
+            |_| ControllerError::InvalidRequest("signature does not match the join".into()),
+        )?;
+
+        if node.credential_issued_at == 0 {
+            return Ok(JoinPoll::Pending);
+        }
+
+        let network = state
+            .networks
+            .get(&node.network_id)
+            .cloned()
+            .ok_or(ControllerError::NotFound("network"))?;
+
+        let credential = self.issue_for_node(node, &network)?;
+        Ok(JoinPoll::Approved {
+            credential: hex::encode(credential.serialize()),
+            network_id: network.network_id.clone(),
+            address: node.address.clone(),
+        })
+    }
+
+    /// Issue a credential for a stored node.
+    fn issue_for_node(
+        &self,
+        node: &Node,
+        network: &Network,
+    ) -> Result<NodeCredential> {
+        let ed25519: [u8; 32] = hex::decode(&node.public_key)
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .ok_or_else(|| {
+                ControllerError::InvalidRequest("node public key is invalid".into())
+            })?;
+
+        let address = Address::from_hex(&node.address)
+            .map_err(|error| ControllerError::InvalidRequest(error.to_string()))?;
+
+        let issued_at = now_unix();
+        let mut nonce = [0u8; NONCE_LEN];
+        {
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+        }
+        Ok(self.inner.identity.issue(
+            network.network_id,
+            address,
+            &ed25519,
+            issued_at,
+            network.credential_ttl_secs,
+            &nonce,
+        ))
     }
 
     /// Enroll a node for a tenant and issue its first credential.

@@ -25,7 +25,7 @@ use std::time::Duration;
 use zt_crypto::credential::NodeCredential;
 use zt_crypto::membership::{ControllerTrust, Membership, TrustedController};
 
-pub use client::{ControllerClient, ControllerNode, EnrollResponse};
+pub use client::{ControllerClient, ControllerNode, EnrollResponse, JoinPoll};
 pub use error::{AgentError, Result};
 pub mod runner;
 
@@ -189,6 +189,62 @@ impl Agent {
         self.state.write(&self.config.state_path)?;
 
         Ok(node)
+    }
+
+    /// Ask to join a network and wait for the operator to approve.
+    ///
+    /// The node signs each poll with the key it joined with, so only the
+    /// holder of that key can collect the credential. When the operator
+    /// approves, the poll answers with the credential and the node adopts
+    /// it like any other.
+    pub fn join(
+        &mut self,
+        tenant_slug: &str,
+        name: &str,
+        wait: Duration,
+    ) -> Result<ControllerNode> {
+        let public_key = self.state.public_key_hex()?;
+        let pq_public_key = self.state.pq_public_key_hex()?;
+
+        let node = self.client().join_network(
+            tenant_slug,
+            &self.config.network_id,
+            name,
+            &public_key,
+            &pq_public_key,
+        )?;
+
+        // The tenant identifier comes back with the node, so the client
+        // can address the tenant-scoped API after the credential arrives.
+        let poll_interval = Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + wait;
+
+        loop {
+            let message = format!("zt-next-join-poll:{}", node.id);
+            let signature = self.state.identity()?.sign(message.as_bytes());
+
+            match self.client().poll_join(&node.id, &hex::encode(signature))? {
+                JoinPoll::Pending => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(AgentError::Usage(format!(
+                            "the operator has not approved {} yet — it stays pending, run again to keep waiting",
+                            node.name
+                        )));
+                    }
+                    std::thread::sleep(poll_interval);
+                }
+                JoinPoll::Approved { credential, .. } => {
+                    // The tenant-scoped API takes the identifier, which the
+                    // client learns here rather than from the operator.
+                    self.config.tenant = node.tenant_id.clone();
+                    self.client = ControllerClient::new(
+                        &self.config.controller_url,
+                        &node.tenant_id,
+                    );
+                    return self.adopt(&credential);
+                }
+            }
+        }
     }
 
     /// Renew the credential now, whether it is due or not.
