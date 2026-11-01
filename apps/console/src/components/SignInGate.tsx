@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Loader2, LogIn, ShieldAlert } from 'lucide-react'
-import { AuthError, beginSignIn, completeSignIn, loadSession, oidcConfig, storeSession } from '../oidc'
+import {
+  AuthError,
+  basePath,
+  beginSignIn,
+  completeSignIn,
+  loadSession,
+  oidcConfig,
+  storeSession,
+} from '../oidc'
 import type { Session } from '../oidc'
 
 /**
@@ -35,7 +43,7 @@ export function SignInGate({ onSignedIn }: { onSignedIn: (session: Session) => v
         onSignedIn(established)
         // The code is in the URL. It must not stay there, because it is a
         // one-time credential and the browser history keeps it.
-        window.history.replaceState({}, document.title, '/')
+        window.history.replaceState({}, document.title, `${basePath()}/`)
       })
       .catch((cause: unknown) => {
         setError(

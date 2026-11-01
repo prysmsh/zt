@@ -255,6 +255,29 @@ zt.hardening.dev {
 }
 ```
 
+## The landing page
+
+`https://zt.hardening.dev` is the landing page: the product in front of
+the console, which is at `https://zt.hardening.dev/console`.
+
+It lives in `apps/landing` — a page, a stylesheet, a script, two fonts
+and one image. There is no build step and no framework: the page is what
+the browser gets.
+
+The design is the brutalist terminal one from the v0 template
+`brutalist-ai-saas-landing-page`, with the copy rewritten for ZT-next.
+The tokens it uses are in `apps/landing/styles.css`: a warm off-white
+ground, a near-black foreground, one orange accent, and no radii. The
+display face is Geist Pixel over JetBrains Mono.
+
+The files are content-addressed when the image is built, so a browser
+that has one never asks again and a change produces a new name. Nothing
+stale is ever served, not even from a cache in front of the container.
+
+To change the copy, edit `apps/landing/index.html` and `app.js` and
+rebuild. The build hashes the sources, so the browser picks the change up
+at once.
+
 ## The Verity admin console
 
 The admin console is at **`https://admin.prysm.sh/console`**, with the

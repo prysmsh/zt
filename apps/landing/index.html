@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+    <title>ZT-next — a post-quantum overlay network</title>
+    <meta
+      name="description"
+      content="ZT-next is a post-quantum overlay network. Your services talk directly, across NATs, clouds and datacentres, over credentials your operator controls."
+    />
+    <link rel="preload" href="/landing/fonts/geist-pixel-grid.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/landing/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/landing/styles.css" />
+  </head>
+  <body>
+    <div class="dot-grid-bg">
+      <div class="wrap">
+        <nav class="nav">
+          <div class="nav-row">
+            <a class="brand" href="/">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2.5" />
+                <circle cx="5" cy="18" r="2.5" />
+                <circle cx="19" cy="18" r="2.5" />
+                <path d="M12 7.5v4M12 11.5 6.4 16M12 11.5 17.6 16" />
+              </svg>
+              <span>ZT-next</span>
+            </a>
+            <div class="nav-links">
+              <a href="#product">Platform</a>
+              <a href="#pricing">Enterprise</a>
+              <a href="#about">Resources</a>
+              <a href="#footer">Company</a>
+            </div>
+            <div class="nav-actions">
+              <span class="nav-avatar" aria-hidden="true"></span>
+              <a class="nav-signin" href="/console">Sign in</a>
+              <a class="nav-cta" href="#pricing">Request a demo</a>
+            </div>
+          </div>
+        </nav>
+
+        <main>
+          <section class="hero">
+            <h1 class="pixel">ROUTE.</h1>
+            <div class="hero-band">
+              <img
+                src="/landing/images/about-isometric.jpg"
+                alt="An isometric view of infrastructure: server racks and network links."
+                width="1024"
+                height="1024"
+              />
+            </div>
+            <h1 class="pixel">ANYWHERE.</h1>
+            <p class="lede">
+              ZT-next is a post-quantum overlay network. Your services talk directly — across
+              NATs, clouds and datacentres — over credentials your operator controls.
+            </p>
+            <a class="cta" href="/console">
+              <span class="cta-mark" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </span>
+              <span class="cta-label">Open the console</span>
+            </a>
+          </section>
+
+          <section class="section" id="product">
+            <div class="section-head">
+              <span class="section-tag">// SECTION: MESH_TELEMETRY</span>
+              <span class="rule"></span>
+              <span class="section-index">004</span>
+            </div>
+
+            <div class="grid grid-4">
+              <article class="cell">
+                <div class="cell-head">
+                  <span class="dot accent"></span>
+                  <span class="dot solid"></span>
+                  <span class="dot hollow"></span>
+                  <span class="cell-head-right">terminal.sys</span>
+                </div>
+                <div class="terminal">
+                  <div class="terminal-lines" id="terminal"></div>
+                  <span class="cursor">_</span>
+                </div>
+              </article>
+
+              <article class="cell">
+                <div class="cell-head">
+                  <span class="cell-head-left">mesh.dither</span>
+                  <span class="cell-head-right">320x240</span>
+                </div>
+                <div class="canvas-wrap">
+                  <canvas id="mesh" width="320" height="240" role="img" aria-label="A dithered view of a mesh of hosts"></canvas>
+                </div>
+              </article>
+
+              <article class="cell">
+                <div class="cell-head">
+                  <span class="cell-head-left">mesh.metrics</span>
+                  <span class="dot accent"></span>
+                </div>
+                <div class="metrics">
+                  <div class="metric">
+                    <span class="metric-value" id="metric-latency">0.0ms</span>
+                    <span class="metric-label">Handshake latency</span>
+                  </div>
+                  <div class="metric">
+                    <span class="metric-value" id="metric-packets">00.0K</span>
+                    <span class="metric-label">Packets / sec</span>
+                  </div>
+                  <div class="metric">
+                    <span class="metric-value" id="metric-uptime">00.00%</span>
+                    <span class="metric-label">Uptime</span>
+                  </div>
+                  <div class="metric">
+                    <span class="metric-value" id="metric-nodes">000</span>
+                    <span class="metric-label">Nodes online</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="cell">
+                <div class="cell-head">
+                  <span class="cell-head-left">nodes.status</span>
+                  <span class="cell-head-right">TICK:0000</span>
+                </div>
+                <table class="nodes">
+                  <thead>
+                    <tr>
+                      <th>Node</th>
+                      <th>Region</th>
+                      <th>Status</th>
+                      <th>Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody id="nodes"></tbody>
+                </table>
+              </article>
+            </div>
+          </section>
+
+          <section class="section" id="about">
+            <div class="section-head">
+              <span class="section-tag">// SECTION: ABOUT_ZT-NEXT</span>
+              <span class="rule"></span>
+              <span class="dot accent blink"></span>
+              <span class="section-index">005</span>
+            </div>
+
+            <div class="split">
+              <figure class="render">
+                <img
+                  src="/landing/images/about-isometric.jpg"
+                  alt="An isometric view of infrastructure: server racks and network links."
+                  width="1024"
+                  height="1024"
+                />
+                <figcaption class="render-top">
+                  <span>RENDER: mesh_topology.obj</span>
+                  <span class="accent">LIVE</span>
+                </figcaption>
+                <figcaption class="render-bottom">
+                  <span>CAM: -45deg / ISO</span>
+                  <span>RES: 1024x1024</span>
+                </figcaption>
+              </figure>
+
+              <div class="manifest">
+                <div class="manifest-head">
+                  <span>MANIFEST.md</span>
+                  <span>v0.1.0</span>
+                </div>
+                <div class="manifest-body">
+                  <div class="manifest-copy">
+                    <h2>Infrastructure built for<br /><span class="accent">raw connectivity</span></h2>
+                    <p>
+                      We engineer the substrate that sits between your services and their users.
+                      No abstractions, no magic. Just deterministic routing, post-quantum handshakes,
+                      and transparent operational control across every host in the network.
+                    </p>
+                    <p>
+                      Founded by operators who spent a decade running distributed systems at
+                      scale. We believe an overlay network should be inspectable, auditable, and
+                      accountable to the person who pays for it.
+                    </p>
+                  </div>
+                  <div class="stats">
+                    <div class="stat">
+                      <span class="stat-label">Uptime</span>
+                      <span class="stat-value" id="stat-uptime">0d 00h 00m 00s</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">Nodes</span>
+                      <span class="stat-value">147</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">Networks</span>
+                      <span class="stat-value">50+</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">Packets relayed</span>
+                      <span class="stat-value">12.8B</span>
+                    </div>
+                    <div class="stat">
+                      <span class="stat-label">Handshake latency</span>
+                      <span class="stat-value">4.2ms</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="pricing">
+            <div class="section-head">
+              <span class="section-tag">// SECTION: DEPLOYMENT_TIERS</span>
+              <span class="rule"></span>
+              <span class="dot accent blink"></span>
+              <span class="section-index">006</span>
+            </div>
+
+            <div class="tiers-head">
+              <div>
+                <h2>Select your deployment tier</h2>
+                <p>
+                  Every tier runs the same protocol, the same console and the same keys. Only the
+                  control plane differs.
+                </p>
+              </div>
+              <div class="live">
+                <span class="dot accent"></span>
+                <span>live throughput: <span id="throughput">0.0</span>k pkt/s</span>
+              </div>
+            </div>
+
+            <div class="grid grid-3">
+              <article class="tier">
+                <div class="tier-head">
+                  <span>Self-hosted</span>
+                  <span class="tier-index">01</span>
+                </div>
+                <div class="tier-price">
+                  <span class="price">$0</span>
+                  <span class="price-unit">/ forever</span>
+                </div>
+                <p class="tier-note">
+                  The controller, the node agent and the protocol are yours. Run them on your own
+                  hardware, under your own keys.
+                </p>
+                <ul class="tier-list">
+                  <li>Full protocol, no feature gates</li>
+                  <li>Unlimited networks and nodes</li>
+                  <li>Your own controller identity</li>
+                  <li>Post-quantum by default</li>
+                  <li>Community support</li>
+                </ul>
+                <a class="tier-cta" href="/console">Deploy free</a>
+              </article>
+
+              <article class="tier featured">
+                <div class="tier-head">
+                  <span>Hosted</span>
+                  <span class="tier-badge">Recommended</span>
+                  <span class="tier-index">02</span>
+                </div>
+                <div class="tier-price">
+                  <span class="price">$12</span>
+                  <span class="price-unit">/ node / month</span>
+                </div>
+                <p class="tier-note">
+                  We run the control plane, the metering and the upgrades. Your nodes keep their
+                  own keys.
+                </p>
+                <ul class="tier-list">
+                  <li>Managed control plane</li>
+                  <li>Tenant isolation per customer</li>
+                  <li>Usage metering and invoices</li>
+                  <li>Credential rotation handled</li>
+                  <li>Email support, one business day</li>
+                </ul>
+                <a class="tier-cta accent" href="/console">Start free</a>
+              </article>
+
+              <article class="tier">
+                <div class="tier-head">
+                  <span>Dedicated</span>
+                  <span class="tier-index">03</span>
+                </div>
+                <div class="tier-price">
+                  <span class="price">Custom</span>
+                  <span class="price-unit">/ year</span>
+                </div>
+                <p class="tier-note">
+                  A controller of your own, in a region of your choosing, under an identity only
+                  you hold.
+                </p>
+                <ul class="tier-list">
+                  <li>Your own controller, your own keys</li>
+                  <li>Single-tenant data plane</li>
+                  <li>Region and residency controls</li>
+                  <li>Audit export and retention policy</li>
+                  <li>A named engineer on call</li>
+                </ul>
+                <a class="tier-cta" href="mailto:hello@zt.hardening.dev">Contact us</a>
+              </article>
+            </div>
+          </section>
+        </main>
+
+        <footer class="footer" id="footer">
+          <div class="footer-row">
+            <a class="brand" href="/">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2.5" />
+                <circle cx="5" cy="18" r="2.5" />
+                <circle cx="19" cy="18" r="2.5" />
+                <path d="M12 7.5v4M12 11.5 6.4 16M12 11.5 17.6 16" />
+              </svg>
+              <span>ZT-next</span>
+            </a>
+            <nav class="footer-links">
+              <a href="#product">Platform</a>
+              <a href="#pricing">Pricing</a>
+              <a href="#about">About</a>
+              <a href="/console">Console</a>
+            </nav>
+            <span class="footer-note">Post-quantum by default. Operator-controlled.</span>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <script src="/landing/app.js"></script>
+  </body>
+</html>

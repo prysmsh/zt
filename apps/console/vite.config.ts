@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // The landing page is the front door, so the console is served under
+    // /console and its assets live with it rather than at the site root.
+    base: env.VITE_ZT_BASE_PATH ?? '/console',
     server: {
       host: '127.0.0.1',
       port: 4173,

@@ -1,0 +1,38 @@
+# The ZT-next landing page.
+#
+# A static site: the marketing page in front of the console. It is served
+# by nginx on its own, and the console's Caddy routes the two apart.
+#
+# The files are content-addressed. A browser that has one never asks
+# again, and a change produces a new name, so nothing stale is ever
+# served — not even from a cache that sits in front of this container.
+
+FROM nginx:1.27-alpine
+
+COPY apps/landing/ /build/
+# The build file is hashed too: it rewrites the references inside the page
+# and the stylesheet, so a change to it changes what is served.
+COPY deploy/Dockerfile.landing /build/Dockerfile.landing
+
+RUN set -eu; \
+    cd /build; \
+    version=$(cat index.html styles.css app.js Dockerfile.landing | sha256sum | cut -c1-10); \
+    mkdir -p /usr/share/nginx/html/landing/fonts /usr/share/nginx/html/landing/images; \
+    sed -e "s|/landing/fonts/geist-pixel-grid.woff2|/landing/fonts/geist-pixel-grid.${version}.woff2|g" \
+        -e "s|/landing/fonts/jetbrains-mono.woff2|/landing/fonts/jetbrains-mono.${version}.woff2|g" \
+        styles.css > "/usr/share/nginx/html/landing/styles.${version}.css"; \
+    cp app.js "/usr/share/nginx/html/landing/app.${version}.js"; \
+    cp fonts/geist-pixel-grid.woff2 "/usr/share/nginx/html/landing/fonts/geist-pixel-grid.${version}.woff2"; \
+    cp fonts/jetbrains-mono.woff2 "/usr/share/nginx/html/landing/fonts/jetbrains-mono.${version}.woff2"; \
+    cp images/about-isometric.jpg "/usr/share/nginx/html/landing/images/about-isometric.${version}.jpg"; \
+    sed -e "s|/landing/styles.css|/landing/styles.${version}.css|g" \
+        -e "s|/landing/app.js|/landing/app.${version}.js|g" \
+        -e "s|/landing/fonts/geist-pixel-grid.woff2|/landing/fonts/geist-pixel-grid.${version}.woff2|g" \
+        -e "s|/landing/fonts/jetbrains-mono.woff2|/landing/fonts/jetbrains-mono.${version}.woff2|g" \
+        -e "s|/landing/images/about-isometric.jpg|/landing/images/about-isometric.${version}.jpg|g" \
+        index.html > /usr/share/nginx/html/index.html; \
+    grep -q "/landing/styles.${version}.css" /usr/share/nginx/html/index.html
+
+COPY deploy/nginx.landing.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

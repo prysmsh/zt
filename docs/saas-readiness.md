@@ -157,7 +157,8 @@ MFA, and for an account that can delete every tenant it should.
 
 The control plane is deployed and running:
 
-- `https://zt.hardening.dev` — the console
+- `https://zt.hardening.dev` — the landing page
+- `https://zt.hardening.dev/console` — the console
 - `https://admin.prysm.sh/console` — the Verity admin console
 - `https://prysm.sh/oidc` — the core issuer, which the console uses
 

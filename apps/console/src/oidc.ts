@@ -137,12 +137,31 @@ interface PendingExchange {
 const PENDING_KEY = 'zt-next.pending'
 
 /**
+ * Where the console is served from.
+ *
+ * The landing page is the front door, so the console lives under a path of
+ * its own. The value is fixed at build time, because the bundle is served
+ * from one place.
+ */
+export function basePath(): string {
+  const configured = import.meta.env.VITE_ZT_BASE_PATH
+  if (!configured) {
+    return '/console'
+  }
+
+  return configured.endsWith('/') ? configured.slice(0, -1) : configured
+}
+
+/**
  * Begin the sign-in flow.
  *
  * The browser is sent to the provider's authorization endpoint. The provider
  * sends it back to the redirect URI with a code and a state.
  */
-export async function beginSignIn(config: OidcConfig, returnTo = '/'): Promise<void> {
+export async function beginSignIn(
+  config: OidcConfig,
+  returnTo = `${basePath()}/`
+): Promise<void> {
   const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)))
   const state = base64Url(crypto.getRandomValues(new Uint8Array(16)))
   const challenge = await challengeOf(verifier)

@@ -23,18 +23,29 @@ ARG VITE_ZT_PUBLIC_SCHEME
 ARG VITE_ZT_OIDC_ISSUER
 ARG VITE_ZT_OIDC_CLIENT_ID
 ARG VITE_ZT_OIDC_AUDIENCE
+ARG VITE_ZT_BASE_PATH
 
 ENV VITE_ZT_PUBLIC_ORIGIN=${VITE_ZT_PUBLIC_ORIGIN}
 ENV VITE_ZT_PUBLIC_SCHEME=${VITE_ZT_PUBLIC_SCHEME}
 ENV VITE_ZT_OIDC_ISSUER=${VITE_ZT_OIDC_ISSUER}
 ENV VITE_ZT_OIDC_CLIENT_ID=${VITE_ZT_OIDC_CLIENT_ID}
 ENV VITE_ZT_OIDC_AUDIENCE=${VITE_ZT_OIDC_AUDIENCE}
+ENV VITE_ZT_BASE_PATH=${VITE_ZT_BASE_PATH}
 
 RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime
 
 COPY --from=builder /build/dist /usr/share/nginx/html
+
+# The console is served under /console, because the landing page is the
+# front door. The bundle's assets live with it.
+RUN mkdir -p /usr/share/nginx/html/console \
+    && mv /usr/share/nginx/html/assets /usr/share/nginx/html/console/assets \
+    && cp /usr/share/nginx/html/index.html /usr/share/nginx/html/console/index.html \
+    && cp /usr/share/nginx/html/50x.html /usr/share/nginx/html/console/50x.html \
+    && cp /usr/share/nginx/html/robots.txt /usr/share/nginx/html/console/robots.txt
+
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

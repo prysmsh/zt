@@ -1,9 +1,10 @@
 # The ZT-next console.
 #
-# Three routes are served:
+# Four routes are served:
 #
-#   /              → the console's static bundle
-#   /api/          → the controller, which is not published to the host
+#   /              → the landing page
+#   /landing/      → the landing page's own files
+#   /console/      → the console's static bundle
 #   /auth/callback → the OIDC callback, which the console's JavaScript reads
 #
 # The controller requires a bearer token on every route except the health
@@ -49,12 +50,22 @@
 	# URL, so the response has to be the console's page rather than a
 	# redirect that loses the query string.
 	handle /auth/callback {
-		rewrite * /index.html
+		rewrite * /console/index.html
 		reverse_proxy console:80
 	}
 
-	handle {
+	# The console, and the assets its bundle asks for.
+	handle /console/* {
 		reverse_proxy console:80
+	}
+
+	handle /landing/* {
+		reverse_proxy landing:80
+	}
+
+	# The landing page is the front door.
+	handle {
+		reverse_proxy landing:80
 	}
 
 	log {

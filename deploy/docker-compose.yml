@@ -37,8 +37,19 @@ services:
       retries: 5
       start_period: 10s
 
+  # The landing page. The marketing page in front of the console, served
+  # from the root so it is the front door.
+  landing:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.landing
+    restart: unless-stopped
+    expose:
+      - "80"
+
   # The console. It is a static bundle served by Caddy, which also proxies
-  # the API under /api so the browser sees a single origin.
+  # the API under /api so the browser sees a single origin. It is served
+  # under /console, because the landing page is the front door.
   console:
     build:
       context: ..
@@ -51,6 +62,9 @@ services:
         VITE_ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://prysm.sh/oidc}
         VITE_ZT_OIDC_CLIENT_ID: ${ZT_OIDC_CLIENT_ID:-zt-console-app-001}
         VITE_ZT_OIDC_AUDIENCE: ${ZT_OIDC_AUDIENCE:-zt-console-app-001}
+        # Where the console is served from. The landing page is the front
+        # door, so the console lives under a path of its own.
+        VITE_ZT_BASE_PATH: ${ZT_BASE_PATH:-/console}
     restart: unless-stopped
     expose:
       - "80"
@@ -65,6 +79,8 @@ services:
       controller:
         condition: service_healthy
       console:
+        condition: service_started
+      landing:
         condition: service_started
     environment:
       ZT_LISTEN_PORT: ${ZT_LISTEN_PORT:-80}
