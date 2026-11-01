@@ -2718,6 +2718,8 @@ dependencies = [
  "ureq",
  "zt-controller",
  "zt-crypto",
+ "zt-node",
+ "zt-tun",
 ]
 
 [[package]]

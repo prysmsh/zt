@@ -28,6 +28,7 @@ COMMANDS:
     renew      Renew the credential if it is due for renewal
     status     Show the node's enrollment and credential status
     identity   Print the node's public key and address
+    run        Carry traffic: open the interface and forward packets
 
 OPTIONS:
     --controller <URL>    Controller base URL (default: http://127.0.0.1:8080)
@@ -37,6 +38,8 @@ OPTIONS:
     --tags <A,B>          Comma-separated tags
     --credential <HEX>    The credential an operator issued (for adopt)
     --state <PATH>        Path to the node state file (default: zt-node.json)
+    --interface <NAME>    Interface to open for the data plane (default: zt0)
+    --listen <ADDR:PORT>  Address the node listens on (default: 0.0.0.0:9994)
     --force               Renew even when the credential is not yet due
     -h, --help            Print this help
 
@@ -78,6 +81,8 @@ struct Options {
     credential: Option<String>,
     state: PathBuf,
     force: bool,
+    interface: String,
+    listen: String,
 }
 
 /// Parse the command line.
@@ -92,6 +97,8 @@ fn parse(arguments: &[String]) -> Result<Options> {
         credential: None,
         state: PathBuf::from("zt-node.json"),
         force: false,
+        interface: "zt0".to_string(),
+        listen: "0.0.0.0:9994".to_string(),
     };
 
     let mut index = 0;
@@ -104,11 +111,11 @@ fn parse(arguments: &[String]) -> Result<Options> {
             }
             "--force" => options.force = true,
             "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state"
-            | "--credential" => {
+            | "--credential" | "--interface" | "--listen" => {
                 index += 1;
-                let value = arguments.get(index).ok_or_else(|| {
-                    AgentError::Usage(format!("{argument} needs a value"))
-                })?;
+                let value = arguments
+                    .get(index)
+                    .ok_or_else(|| AgentError::Usage(format!("{argument} needs a value")))?;
                 match argument {
                     "--controller" => options.controller = value.clone(),
                     "--tenant" => options.tenant = value.clone(),
@@ -123,6 +130,8 @@ fn parse(arguments: &[String]) -> Result<Options> {
                     }
                     "--state" => options.state = PathBuf::from(value),
                     "--credential" => options.credential = Some(value.clone()),
+                    "--interface" => options.interface = value.clone(),
+                    "--listen" => options.listen = value.clone(),
                     _ => unreachable!(),
                 }
             }
@@ -165,6 +174,7 @@ fn run(arguments: &[String]) -> Result<String> {
         "renew" => renew(options, config),
         "status" => status(options, config),
         "identity" => identity(options, config),
+        "run" => run_data_plane(options, config),
         other => Err(AgentError::Usage(format!("unknown command {other}"))),
     }
 }
@@ -314,6 +324,49 @@ fn identity(options: Options, config: AgentConfig) -> Result<String> {
         "public key: {public_key}\nstate:      {}",
         options.state.display()
     ))
+}
+
+/// Carry traffic.
+///
+/// The node opens the virtual interface, tells the controller how its peers
+/// reach it, asks for the topology, and forwards packets between the
+/// interface and the peers until it is stopped.
+fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
+    let agent = Agent::open(config)?;
+
+    let listen: std::net::SocketAddr = options
+        .listen
+        .parse()
+        .map_err(|_| AgentError::Usage(format!("'{}' is not an address", options.listen)))?;
+
+    // The interface is opened by the operating system: the node needs the
+    // privilege to create it, and the agent asks for none.
+    let device = zt_tun::TunDevice::open(&options.interface, 1400)
+        .map_err(|error| AgentError::Io(format!("cannot open the interface: {error}")))?;
+
+    let runner_config = zt_agent::RunnerConfig {
+        interface: options.interface.clone(),
+        mtu: 1400,
+        listen,
+        ..Default::default()
+    };
+
+    let mut runner = zt_agent::Runner::new(
+        Box::new(device),
+        agent.client().clone(),
+        agent.state().static_identity()?,
+        agent.membership()?,
+        agent.trust()?,
+        runner_config,
+    )?;
+
+    // The controller needs to know where the peers can reach this node,
+    // and which post-quantum key they check its signature with.
+    runner.report_presence(&agent.state().pq_public_key_hex()?)?;
+
+    runner.run()?;
+
+    Ok(String::new())
 }
 
 /// The current Unix time in seconds.

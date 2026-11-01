@@ -75,24 +75,30 @@ it over the session, and writes the frames the peers send back to the
 interface. The test drives two nodes over real UDP sockets and watches a
 packet cross the overlay and land on the other device.
 
-What is missing is the wiring around it:
+The wiring around it is there too. The controller assigns every node an
+IPv4 address out of its network's range when it enrols, and hands each
+node a topology: its own address, the range it lives in, and the peers it
+shares the range with, each with the keys and the endpoint it needs to
+reach them. The node agent opens the interface, reports how its peers
+reach it, asks for the topology, completes the handshakes, and forwards.
 
-- **The overlay addresses.** A node needs an IPv4 address in its
-  network's range, and it needs the addresses of its peers. The
-  controller derives a ten-byte protocol address for every node, but it
-  assigns nothing out of the network's IPv4 range, and the data plane
-  routes on that range.
-- **The topology.** Nothing tells a node where its peers are or how to
-  reach them. The controller holds the nodes, but it does not hold their
-  endpoints, so it cannot hand out a topology.
-- **The interface.** The TUN crate opens the device, but nothing
-  configures it — the address, the route, and bringing it up all need
-  privileges the agent does not have yet.
+The test drives two node agents against a real controller over HTTP, and
+watches a packet cross the overlay and land on the other node's device.
 
-So traffic does not route between nodes yet. Everything above is the
-control plane for a network that cannot yet carry traffic. A tenant would
-get a working management console and a working credential system for a
-mesh that does not pass packets.
+What is still missing:
+
+- **The interface is not configured.** The TUN crate opens the device,
+  but the address, the route, and bringing it up are left to the
+  operating system. A deployment has to configure the interface before
+  the agent runs.
+- **The topology is fetched on a timer, not on a change.** A node learns
+  about a new peer when it next asks, not the moment the peer appears.
+- **There is no relay.** A node can only reach a peer it has a route to.
+  A peer behind a NAT that cannot be reached directly is out of reach.
+
+So traffic routes between nodes that can reach each other, but the
+deployment still needs the interface set up by hand, and a node cannot
+reach a peer it has no route to.
 
 ### No Tailscale interoperability, end to end
 
@@ -158,15 +164,16 @@ The control plane is deployed and running:
 What is verified end to end: an operator signs in, creates a tenant,
 creates a network, enrols a node, receives a credential, and the node
 adopts it and renews with it over TLS. Suspending the tenant locks it
-out and stops the renewal.
+out and stops the renewal. And two node agents, against a real
+controller, complete a handshake and carry a packet across the overlay.
 
 ## The order I would build the rest in
 
-1. **The data plane.** The forwarding path is done. What is left is the
-   wiring: the controller assigns the overlay addresses and hands out the
-   topology, and the agent opens and configures the interface. Without it
-   the product does not carry traffic, and everything else is a console
-   around a mesh.
+1. **The data plane.** The forwarding path, the addressing, and the
+   topology are done. What is left is the deployment: the interface has
+   to be configured, and a node needs a way to reach a peer it has no
+   route to. Without it the product does not carry traffic, and
+   everything else is a console around a mesh.
 2. **Metering.** Needed before the first shared tenant is billed, and
    cheap to add once the data plane exists, because that is where the
    numbers come from.

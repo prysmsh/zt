@@ -19,6 +19,8 @@ pub enum AgentError {
     Io(String),
     /// The command line was not understood.
     Usage(String),
+    /// The node's data plane failed.
+    Node(String),
 }
 
 impl fmt::Display for AgentError {
@@ -30,6 +32,7 @@ impl fmt::Display for AgentError {
             Self::Crypto(message) => write!(f, "cryptographic error: {message}"),
             Self::Credential(message) => write!(f, "credential error: {message}"),
             Self::Io(message) => write!(f, "{message}"),
+            Self::Node(message) => write!(f, "node error: {message}"),
             Self::Usage(message) => write!(f, "{message}"),
         }
     }
@@ -56,6 +59,12 @@ impl From<crate::client::ClientError> for AgentError {
                 AgentError::Controller(format!("invalid response: {message}"))
             }
         }
+    }
+}
+
+impl From<zt_node::NodeError> for AgentError {
+    fn from(error: zt_node::NodeError) -> Self {
+        Self::Node(error.to_string())
     }
 }
 

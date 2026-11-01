@@ -134,6 +134,7 @@ pub struct Topology {
 /// The node authenticates with the credential the controller issued it. The
 /// credential is signed by the controller and bound to the node's own key,
 /// so the node holds no secret.
+#[derive(Clone)]
 pub struct ControllerClient {
     base_url: String,
     tenant: String,

@@ -51,9 +51,11 @@ Renewed credential for web-01
 | Command | What it does |
 |---|---|
 | `enroll` | Register with a controller and store the credential |
+| `adopt` | Store a credential an operator issued for this node |
 | `renew` | Renew the credential, if it is due |
 | `status` | Show enrollment state and credential expiry |
 | `identity` | Print the node's public key |
+| `run` | Carry traffic: open the interface and forward packets |
 
 ### Options
 
@@ -66,6 +68,33 @@ Renewed credential for web-01
 | `--tags <A,B>` | Comma-separated tags |
 | `--state <PATH>` | State file path. Default `zt-node.json` |
 | `--force` | Renew even when the credential is not yet due |
+| `--interface <NAME>` | Interface to open for the data plane. Default `zt0` |
+| `--listen <ADDR:PORT>` | Address the node listens on. Default `0.0.0.0:9994` |
+
+## Carrying traffic
+
+`zt-agent run` is the data plane. It opens the virtual interface, tells
+the controller how its peers reach it, asks for the topology, completes
+the handshakes, and forwards packets between the interface and the peers.
+
+```text
+$ zt-agent run --controller https://zt.example.dev --tenant acme \
+    --interface zt0 --listen 0.0.0.0:9994
+```
+
+The interface has to be configured by the operating system before the
+agent runs: the address, the route, and bringing it up. The agent opens
+the device and asks for no privilege.
+
+The topology is what makes that work. The controller assigns the node an
+address in its network's range when it enrols, and hands the node the
+addresses and the endpoints of its peers. A node is told nothing about
+any other network or tenant.
+
+The interface the agent opens is a queue rather than a kernel device in
+the tests, so the data plane is exercised without privileges. The test
+drives two agents against a real controller and watches a packet cross
+the overlay.
 
 ## How a node authenticates
 

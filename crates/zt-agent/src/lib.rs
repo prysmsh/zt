@@ -27,6 +27,9 @@ use zt_crypto::membership::{ControllerTrust, Membership, TrustedController};
 
 pub use client::{ControllerClient, ControllerNode, EnrollResponse};
 pub use error::{AgentError, Result};
+pub mod runner;
+
+pub use runner::{Runner, RunnerConfig};
 pub use state::{default_state_path, NodeState};
 
 /// Configuration for an agent.

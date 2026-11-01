@@ -8,6 +8,8 @@ description = "Node agent for ZT-next: enrollment, credential renewal, and membe
 
 [dependencies]
 zt-crypto = { workspace = true }
+zt-node = { path = "../zt-node" }
+zt-tun = { path = "../zt-tun" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
