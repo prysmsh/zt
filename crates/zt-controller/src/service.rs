@@ -787,11 +787,13 @@ impl Controller {
             .cloned()
             .ok_or(ControllerError::NotFound("network"))?;
 
-        if state
-            .nodes
-            .values()
-            .any(|node| node.tenant_id == tenant_id && node.name == name)
-        {
+        // The name has to be unique among the tenant's live nodes. A
+        // revoked node's name is free again: a host that is rebuilt comes
+        // back with the same name, and the audit trail refers to the node
+        // by its identifier rather than by its name.
+        if state.nodes.values().any(|node| {
+            node.tenant_id == tenant_id && node.name == name && node.status != NodeStatus::Revoked
+        }) {
             return Err(ControllerError::Conflict(
                 "node name already exists".to_string(),
             ));

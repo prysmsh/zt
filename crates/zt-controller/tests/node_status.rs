@@ -67,6 +67,14 @@ async fn fixture() -> Fixture {
 impl Fixture {
     /// Enrol a node.
     async fn enroll(&self, name: &str) -> zt_controller::model::Node {
+        self.try_enroll(name).await.expect("enrol")
+    }
+
+    /// Enrol a node, and report the failure rather than panicking.
+    async fn try_enroll(
+        &self,
+        name: &str,
+    ) -> Result<zt_controller::model::Node, zt_controller::ControllerError> {
         let (node, _) = self
             .controller
             .enroll_node(
@@ -80,10 +88,9 @@ impl Fixture {
                 Vec::new(),
                 &Actor::system(),
             )
-            .await
-            .expect("enrol");
+            .await?;
 
-        node
+        Ok(node)
     }
 
     /// The status the console would show for a node.
@@ -190,6 +197,33 @@ async fn a_renewal_is_a_check_in() {
         .expect("renew");
 
     assert_eq!(fixture.status(&node.id).await, "online");
+}
+
+#[tokio::test]
+async fn a_revoked_nodes_name_can_be_used_again() {
+    // A host that is rebuilt comes back with the same name, so a revoked
+    // node's name has to be free again.
+    let fixture = fixture().await;
+    let node = fixture.enroll("web-01").await;
+
+    fixture
+        .controller
+        .revoke_node(&fixture.tenant, &node.id, &Actor::system())
+        .await
+        .expect("revoke");
+
+    let again = fixture.enroll("web-01").await;
+    assert_ne!(again.id, node.id);
+    assert_eq!(again.ipv4_address, "10.42.0.2");
+}
+
+#[tokio::test]
+async fn a_live_nodes_name_cannot_be_used_again() {
+    let fixture = fixture().await;
+    fixture.enroll("web-01").await;
+
+    let conflict = fixture.try_enroll("web-01").await;
+    assert!(conflict.is_err(), "the name should be taken");
 }
 
 #[tokio::test]

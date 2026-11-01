@@ -134,8 +134,11 @@ impl SqliteStore {
                 created_at INTEGER NOT NULL
             );
 
+            -- The name is unique among the tenant's live nodes. A revoked
+            -- node's name is free again, so a host that is rebuilt comes
+            -- back with the same name.
             CREATE UNIQUE INDEX IF NOT EXISTS nodes_network_name
-                ON nodes(network_id, name);
+                ON nodes(network_id, name) WHERE status != 'revoked';
 
             CREATE TABLE IF NOT EXISTS policies (
                 id TEXT PRIMARY KEY,
@@ -182,6 +185,16 @@ impl SqliteStore {
             CREATE INDEX IF NOT EXISTS policies_tenant ON policies(tenant_id);
             CREATE INDEX IF NOT EXISTS relays_tenant ON relays(tenant_id);
             "#,
+        )?;
+
+        // The name index used to cover revoked nodes as well, so a revoked
+        // node's name could never be used again. It is replaced with one
+        // that only covers the live ones.
+        connection.execute("DROP INDEX IF EXISTS nodes_network_name", [])?;
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS nodes_network_name
+             ON nodes(network_id, name) WHERE status != 'revoked'",
+            [],
         )?;
 
         // An existing database was created before the node carried an IPv4
