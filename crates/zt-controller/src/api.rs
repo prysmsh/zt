@@ -399,8 +399,7 @@ async fn poll_join(
 async fn approve_node(
     State(controller): State<Controller>,
     principal: Principal,
-    Path(tenant): Path<String>,
-    axum::extract::Path(node_id): axum::extract::Path<String>,
+    Path((tenant, node_id)): Path<(String, String)>,
 ) -> Result<Json<crate::model::Node>, ControllerError> {
     let (node, _credential) = controller
         .approve_node(&tenant, &node_id, &principal.actor())

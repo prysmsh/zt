@@ -986,6 +986,45 @@ impl Controller {
             .cloned()
             .ok_or(ControllerError::NotFound("network"))?;
 
+        // A node that asks twice is the same host re-running join — its
+        // key is its identity. The pending request is resumed rather than
+        // duplicated, which is what a host whose operator was slow to
+        // click expects.
+        let public_key = hex::encode(keys.ed25519);
+        let existing_id = state
+            .nodes
+            .values()
+            .find(|node| {
+                node.tenant_id == tenant_id
+                    && node.network_id == network.id
+                    && node.public_key == public_key
+                    && node.status != NodeStatus::Revoked
+            })
+            .map(|node| node.id.clone());
+
+        if let Some(existing_id) = existing_id {
+            let existing = state.nodes.get(&existing_id).expect("node exists");
+            if existing.name != name {
+                let name_taken = state.nodes.values().any(|node| {
+                    node.tenant_id == tenant_id
+                        && node.name == name
+                        && node.public_key != public_key
+                        && node.status != NodeStatus::Revoked
+                });
+                if name_taken {
+                    return Err(ControllerError::Conflict(
+                        "node name already exists".to_string(),
+                    ));
+                }
+            }
+
+            let node = state.nodes.get_mut(&existing_id).expect("node exists");
+            node.name = name.clone();
+            let resumed = node.clone();
+            drop(state);
+            return Ok(resumed);
+        }
+
         if state.nodes.values().any(|node| {
             node.tenant_id == tenant_id && node.name == name && node.status != NodeStatus::Revoked
         }) {

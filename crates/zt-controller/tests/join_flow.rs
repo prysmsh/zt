@@ -200,6 +200,85 @@ async fn a_client_joins_polls_and_collects_its_credential_after_approval() {
 }
 
 #[tokio::test]
+async fn a_host_that_asks_twice_resumes_its_pending_request() {
+    let fixture = fixture().await;
+
+    let tenant = fixture
+        .controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    let network = fixture
+        .controller
+        .create_network(
+            &tenant.id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    let keys = NodeKeys {
+        ed25519: [11u8; 32],
+        ml_dsa: vec![7u8; 1952],
+    };
+
+    let first = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "laptop-01".into(), keys.clone())
+        .await
+        .expect("first join");
+
+    // The same key asking again is the same host: the pending request is
+    // resumed, not duplicated.
+    let second = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "laptop-01".into(), keys.clone())
+        .await
+        .expect("second join");
+    assert_eq!(first.id, second.id);
+
+    // A rename through a re-join works when the new name is free.
+    let renamed = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "laptop-renamed".into(), keys.clone())
+        .await
+        .expect("rename");
+    assert_eq!(first.id, renamed.id);
+    assert_eq!(renamed.name, "laptop-renamed");
+
+    // A different host cannot take the name the pending request holds.
+    let other = NodeKeys {
+        ed25519: [12u8; 32],
+        ml_dsa: vec![8u8; 1952],
+    };
+    let conflict = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "laptop-renamed".into(), other)
+        .await;
+    assert!(conflict.is_err(), "a second host cannot steal the name");
+
+    // Still exactly one pending node for the host.
+    let listed = fixture.controller.list_nodes(&tenant.id, Some(&network.id)).await;
+    let pending = listed
+        .iter()
+        .filter(|node| node.status == zt_controller::NodeStatus::Pending)
+        .count();
+    assert_eq!(pending, 1);
+}
+
+#[tokio::test]
 async fn a_join_for_an_unknown_network_is_refused() {
     let fixture = fixture().await;
 
