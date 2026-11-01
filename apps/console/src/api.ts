@@ -109,6 +109,8 @@ export interface ApiClient {
   createNetwork(input: CreateNetworkInput): Promise<Network>
   enrollNode(input: EnrollNodeInput): Promise<EnrollNodeResult>
   revokeNode(nodeId: string): Promise<void>
+  /** Revoke every pending join request at once. Returns how many. */
+  rejectPendingNodes(): Promise<number>
   /** Approve a pending node, which lets it collect its credential. */
   approveNode(nodeId: string): Promise<MeshNode>
   renewCredential(nodeId: string): Promise<EnrollNodeResult>
@@ -287,6 +289,13 @@ export function createHttpClient(
     },
     async revokeNode(nodeId) {
       await request<void>(`${tenantBase}/nodes/${encodeURIComponent(nodeId)}/revoke`, { method: 'POST' })
+    },
+    async rejectPendingNodes() {
+      const result = await request<{ rejected: number }>(
+        `${tenantBase}/nodes/reject-pending`,
+        { method: 'POST' },
+      )
+      return result.rejected
     },
     async approveNode(nodeId) {
       const result = await request<{ node: ControllerNode }>(

@@ -124,8 +124,11 @@ impl Controller {
     ) -> Result<Self> {
         let controller = Self::with_store(identity, store.clone())?;
 
-        // The retention job runs forever on its own task.
+        // The retention jobs run forever on their own tasks: the store
+        // prunes what it keeps past its horizon, and the controller
+        // expires join requests nobody approved.
         tokio::spawn(crate::retention::run_forever(store, policy));
+        tokio::spawn(crate::retention::purge_pending_forever(controller.clone()));
 
         Ok(controller)
     }
@@ -1220,6 +1223,98 @@ impl Controller {
             network.credential_ttl_secs,
             &nonce,
         ))
+    }
+
+    /// Revoke every pending join request for a tenant.
+    ///
+    /// This is the cleanup for a flood of fake requests: one call instead
+    /// of fifty clicks. Only requests that hold no credential are
+    /// touched — a host that was already approved is a member even before
+    /// its first check-in, whatever its status says. Returns how many
+    /// were rejected.
+    pub async fn reject_pending_nodes(&self, tenant_id: &str, actor: &Actor) -> Result<usize> {
+        let mut state = self.inner.state.write().await;
+
+        let pending: Vec<EntityId> = state
+            .nodes
+            .values()
+            .filter(|node| {
+                node.tenant_id == tenant_id
+                    && node.status == NodeStatus::Pending
+                    && node.credential_issued_at == 0
+            })
+            .map(|node| node.id.clone())
+            .collect();
+
+        let mut rejected = 0;
+        for id in pending {
+            let Some(node) = state.nodes.get_mut(&id) else {
+                continue;
+            };
+            node.status = NodeStatus::Revoked;
+            let name = node.name.clone();
+            state.record_for_tenant(
+                Some(tenant_id),
+                "node.rejected",
+                "node",
+                &id,
+                actor.display(),
+                format!("Rejected join request from {name}"),
+            );
+            rejected += 1;
+        }
+
+        if rejected > 0 {
+            self.persist(&state).await?;
+        }
+        Ok(rejected)
+    }
+
+    /// Purge join requests that nobody ever approved.
+    ///
+    /// A pending node holds an address and a row in the console forever
+    /// otherwise. Seven days is far longer than any real host waits — the
+    /// agent gives up after five minutes — and far shorter than a decade
+    /// of clutter. A node that was approved is never touched, even if it
+    /// has not checked in yet.
+    pub async fn purge_stale_pending(&self, now: u64) -> Result<usize> {
+        let cutoff = now.saturating_sub(crate::retention::PENDING_JOIN_TTL);
+
+        let mut state = self.inner.state.write().await;
+        let stale: Vec<EntityId> = state
+            .nodes
+            .values()
+            .filter(|node| {
+                node.status == NodeStatus::Pending
+                    && node.credential_issued_at == 0
+                    && node.created_at < cutoff
+            })
+            .map(|node| node.id.clone())
+            .collect();
+
+        let mut purged = 0;
+        for id in stale {
+            let Some(node) = state.nodes.get_mut(&id) else {
+                continue;
+            };
+            node.status = NodeStatus::Revoked;
+            let name = node.name.clone();
+            let tenant_id = node.tenant_id.clone();
+            state.record_for_tenant(
+                Some(&tenant_id),
+                "node.expired",
+                "node",
+                &id,
+                "system",
+                format!("Join request from {name} expired unapproved"),
+            );
+            purged += 1;
+        }
+
+        if purged > 0 {
+            self.persist(&state).await?;
+        }
+        Ok(purged)
     }
 
     /// Enroll a node for a tenant and issue its first credential.

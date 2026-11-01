@@ -21,6 +21,13 @@ const TENANT_RETENTION: u64 = 90 * 86_400;
 /// the storage.
 const SAMPLE_RETENTION: u64 = 400 * 86_400;
 
+/// How long an unapproved join request is kept.
+///
+/// The agent gives up waiting after five minutes and re-running join
+/// resumes the same request, so nothing real is ever older than a few
+/// days. Requests older than this are junk: revoked, and the name freed.
+pub const PENDING_JOIN_TTL: u64 = 7 * 86_400;
+
 /// How often the retention job runs.
 const RUN_EVERY: u64 = 6 * 60 * 60;
 
@@ -75,6 +82,24 @@ pub async fn run_forever(store: Arc<dyn Store>, policy: Retention) {
         let purged = run(&store, &policy, now).await;
         if purged > 0 {
             tracing::info!(purged, "retention pruned");
+        }
+    }
+}
+
+/// Expire unapproved join requests on a timer, forever.
+///
+/// The controller's state lives in memory and is persisted as a whole, so
+/// this runs against the controller rather than the store.
+pub async fn purge_pending_forever(controller: crate::Controller) {
+    let mut timer = interval(Duration::from_secs(RUN_EVERY));
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        timer.tick().await;
+        match controller.purge_stale_pending(now_unix()).await {
+            Ok(0) => {}
+            Ok(purged) => tracing::info!(purged, "expired stale join requests"),
+            Err(error) => tracing::warn!(%error, "could not expire join requests"),
         }
     }
 }

@@ -189,11 +189,14 @@ function NodeTable({
   items,
   onOpen,
   onApprove,
+  onReject,
 }: {
   items: MeshNode[]
   onOpen?: (node: MeshNode) => void
   /** Approve a pending node. Omitted where approval makes no sense. */
   onApprove?: (node: MeshNode) => void
+  /** Reject a pending node, which revokes it. */
+  onReject?: (node: MeshNode) => void
 }) {
   return (
     <div className="table-wrap">
@@ -206,7 +209,7 @@ function NodeTable({
             <th>Last seen</th>
             <th>Credential</th>
             <th>Platform</th>
-            {onApprove ? <th aria-label="Actions" /> : null}
+            {onApprove || onReject ? <th aria-label="Actions" /> : null}
           </tr>
         </thead>
         <tbody>
@@ -231,19 +234,35 @@ function NodeTable({
               <td>{node.lastSeen}</td>
               <td>{node.credentialExpires}</td>
               <td>{node.platform}</td>
-              {onApprove ? (
+              {onApprove || onReject ? (
                 <td>
                   {node.status === 'pending' ? (
-                    <button
-                      type="button"
-                      className="button primary"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onApprove(node)
-                      }}
-                    >
-                      Approve
-                    </button>
+                    <span className="cell-actions">
+                      {onApprove ? (
+                        <button
+                          type="button"
+                          className="button primary"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onApprove(node)
+                          }}
+                        >
+                          Approve
+                        </button>
+                      ) : null}
+                      {onReject ? (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onReject(node)
+                          }}
+                        >
+                          Reject
+                        </button>
+                      ) : null}
+                    </span>
                   ) : null}
                 </td>
               ) : null}
@@ -512,6 +531,12 @@ function NodesPage({
   )
   const scopeName = scope ? networks.find((network) => network.id === scope)?.name : undefined
 
+  // The cleanup for a flood of fake join requests: one call instead of
+  // one click each. The count is over the whole tenant, because the
+  // endpoint is tenant-wide.
+  const pendingCount = data.nodes.filter((node) => node.status === 'pending').length
+  const [rejecting, setRejecting] = useState(false)
+
   const handleApprove = async (node: MeshNode) => {
     setBusy(true)
     try {
@@ -519,6 +544,26 @@ function NodesPage({
       onChanged()
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleReject = async (node: MeshNode) => {
+    setBusy(true)
+    try {
+      await api.revokeNode(node.id)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRejectAll = async () => {
+    setRejecting(true)
+    try {
+      await api.rejectPendingNodes()
+      onChanged()
+    } finally {
+      setRejecting(false)
     }
   }
 
@@ -531,6 +576,11 @@ function NodesPage({
           <p className="page-description">Enrollment, approval, connectivity, and credential lifecycle.</p>
         </div>
         <div className="head-actions">
+          {pendingCount > 0 ? (
+            <button type="button" className="button" onClick={handleRejectAll} disabled={rejecting}>
+              Reject pending ({pendingCount})
+            </button>
+          ) : null}
           <button type="button" className="button primary" onClick={() => setEnrolling(true)}>
             <Plus size={15} />
             Add node
@@ -576,7 +626,7 @@ function NodesPage({
             }
           />
         ) : (
-          <NodeTable items={filtered} onOpen={setSelected} onApprove={handleApprove} />
+          <NodeTable items={filtered} onOpen={setSelected} onApprove={handleApprove} onReject={handleReject} />
         )}
       </section>
       {selected ? (

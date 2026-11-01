@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let identity = IdentityStore::new(&identity_path).load_or_create()?;
     let store = Arc::new(SqliteStore::open(&database_path)?);
-    let controller = Controller::with_store(identity, store)?;
+    let controller = Controller::with_store_and_retention(identity, store, Default::default())?;
 
     tracing::info!(
         %bind,

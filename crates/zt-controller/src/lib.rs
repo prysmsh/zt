@@ -31,8 +31,8 @@ pub use error::{ControllerError, Result};
 pub use identity::IdentityStore;
 pub use middleware::AuthState;
 pub use model::{
-    Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, PortSpec,
-    Protocol, Relay, RelayStatus, Selector,
+    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy,
+    PortSpec, Protocol, Relay, RelayStatus, Selector,
 };
 pub use principal::Principal;
 pub use service::{Controller, SharedController, DEFAULT_CREDENTIAL_TTL_SECS};

@@ -93,6 +93,13 @@ fn build_router(controller: Controller) -> Router {
             "/api/v1/t/{tenant}/nodes/{id}/approve",
             post(approve_node),
         )
+        // The cleanup for a flood of fake join requests: one call instead
+        // of fifty clicks. The static segment matches before {id}, so
+        // this cannot shadow the per-node routes.
+        .route(
+            "/api/v1/t/{tenant}/nodes/reject-pending",
+            post(reject_pending_nodes),
+        )
         .route(
             "/api/v1/t/{tenant}/nodes/{id}",
             get(get_node).delete(revoke_node),
@@ -411,6 +418,18 @@ async fn approve_node(
         .approve_node(&tenant, &node_id, &principal.actor())
         .await?;
     Ok(Json(node))
+}
+
+/// Revoke every pending join request for the tenant at once.
+async fn reject_pending_nodes(
+    State(controller): State<Controller>,
+    principal: Principal,
+    Path(tenant): Path<String>,
+) -> Result<Json<serde_json::Value>, ControllerError> {
+    let rejected = controller
+        .reject_pending_nodes(&tenant, &principal.actor())
+        .await?;
+    Ok(Json(serde_json::json!({ "rejected": rejected })))
 }
 
 async fn tenant_billing(

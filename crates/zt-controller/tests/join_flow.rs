@@ -465,6 +465,109 @@ async fn anonymous_join_requests_are_rate_limited() {
 }
 
 #[tokio::test]
+async fn an_unapproved_request_expires_but_an_approved_host_survives() {
+    let fixture = fixture().await;
+
+    let tenant = fixture
+        .controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    let network = fixture
+        .controller
+        .create_network(
+            &tenant.id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    let keys = NodeKeys {
+        ed25519: [21u8; 32],
+        ml_dsa: vec![1u8; 1952],
+    };
+
+    // One host asks to join and waits. Another was enrolled and approved
+    // but has not checked in yet — it holds a credential, so it is a
+    // member regardless of its age.
+    let waiting = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "waiting".into(), keys.clone())
+        .await
+        .expect("join");
+
+    let (member, _credential) = fixture
+        .controller
+        .enroll_node(
+            &tenant.id,
+            &network.id,
+            "member".into(),
+            NodeKeys {
+                ed25519: [22u8; 32],
+                ml_dsa: vec![2u8; 1952],
+            },
+            Vec::new(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("enroll");
+    fixture
+        .controller
+        .approve_node(&tenant.id, &member.id, &zt_controller::Actor::system())
+        .await
+        .expect("approve");
+
+    // A week later, the expiry runs.
+    let a_week_later = zt_controller::now_unix() + 8 * 86_400;
+    let purged = fixture
+        .controller
+        .purge_stale_pending(a_week_later)
+        .await
+        .expect("purge");
+    assert_eq!(purged, 1);
+
+    let waiting_after = fixture
+        .controller
+        .list_nodes(&tenant.id, Some(&network.id))
+        .await
+        .into_iter()
+        .find(|node| node.id == waiting.id)
+        .expect("the node still exists for the audit trail");
+    assert_eq!(waiting_after.status, zt_controller::NodeStatus::Revoked);
+
+    // The approved member is untouched, even though it never checked in.
+    let member_after = fixture
+        .controller
+        .list_nodes(&tenant.id, Some(&network.id))
+        .await
+        .into_iter()
+        .find(|node| node.id == member.id)
+        .expect("member");
+    assert_eq!(member_after.status, zt_controller::NodeStatus::Pending);
+    assert!(member_after.credential_issued_at > 0);
+
+    // A fresh request is not expired before its time.
+    let purged = fixture
+        .controller
+        .purge_stale_pending(a_week_later)
+        .await
+        .expect("purge again");
+    assert_eq!(purged, 0);
+}
+
+#[tokio::test]
 async fn a_join_for_an_unknown_network_is_refused() {
     let fixture = fixture().await;
 

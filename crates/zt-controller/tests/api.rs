@@ -229,6 +229,112 @@ async fn joining_by_request_approving_and_revoking_works_over_http() {
 }
 
 #[tokio::test]
+async fn rejecting_pending_revokes_junk_and_leaves_members_alone() {
+    let app = app();
+    let tenant_id = tenant(&app, "Acme").await;
+    let network = network(&app, &tenant_id, "Production", "10.42.0.0/24").await;
+
+    // Two hosts ask to join, and a third is enrolled the old way —
+    // approved, holding a credential, a member.
+    let mut pending_ids = Vec::new();
+    for i in 0..2u8 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/join")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "tenant_slug": "acme",
+                            "network_id": network["id"],
+                            "name": format!("junk-{i}"),
+                            "public_key": hex::encode([20u8 + i; 32]),
+                            "pq_public_key": hex::encode(vec![20u8 + i; 1952])
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let node = json_body(response).await;
+        pending_ids.push(node["id"].as_str().unwrap().to_string());
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "network_id": network["id"],
+                        "name": "member-01",
+                        "public_key": "cc".repeat(32)
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let member = json_body(response).await;
+
+    // One call rejects every pending request.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/reject-pending"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["rejected"], 2);
+
+    for id in &pending_ids {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/t/{tenant_id}/nodes/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(json_body(response).await["status"], "revoked");
+    }
+
+    // The member is untouched.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/v1/t/{tenant_id}/nodes/{}",
+                    member["node"]["id"].as_str().unwrap()
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let node = json_body(response).await;
+    assert_eq!(node["status"], "pending");
+    assert!(node["credential_issued_at"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
 async fn enrollment_rejects_invalid_public_key() {
     let app = app();
     let tenant = tenant(&app, "Acme").await;
