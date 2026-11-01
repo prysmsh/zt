@@ -113,7 +113,7 @@ What is not proven is a live session with a `tailscaled` peer: the control
 plane that `tailscaled` expects has not been stood up, so there is nothing
 to point it at. The protocol is the part that was open, and it is closed.
 
-### Billing is computed, not collected
+### Taking payment
 
 The numbers a tenant is charged for now exist. The data plane counts the
 bytes and the packets it carries, the node agent reports them with its
@@ -122,31 +122,17 @@ the node-hours — the integral of the node count over the period — and
 multiplies them by the tenant's rates. The master console shows what each
 tenant owes, and a tenant can ask for its own invoice.
 
-What is missing is **taking the money**. There is no payment provider
-wired in, no dunning, and no proration when a plan changes mid-period.
-The invoice is an estimate, not a debt.
+The invoice is computed and prorated: a plan change applies the old
+rates for the elapsed time and the new rates for the rest. What is
+missing is **taking the money** — a payment provider, the dunning, and
+the collection side that turns an invoice into a debt and then into a
+receipt.
 
-The period is a calendar month and the rates are on the tenant, so a
-price is written once and the invoice follows it.
 
-### No retention job
 
-Deletion is a soft delete and the data is retained. Nothing purges it.
-The comment in the model says a separate job does this; that job does not
-exist.
 
-### No rate limiting
 
-The API has no rate limiting. A single tenant can consume the
-controller's capacity. Quotas bound how many resources a tenant may
-*hold*, not how fast it may act.
 
-### No pagination
-
-Every list endpoint returns everything it holds. A tenant with ten
-thousand nodes gets ten thousand nodes in one response, and so does the
-master console listing every tenant. The `ListResponse` type has a
-`nextCursor` field that nothing populates.
 
 ### No email, invitations, or password reset
 
