@@ -79,6 +79,21 @@ describe('mapNode', () => {
     const mapped = mapNode({ ...node, status: 'revoked' })
     expect(mapped.status).toBe('revoked')
   })
+
+  it('tells a join request apart from a member that has not checked in', () => {
+    // A join request: pending, no credential ever issued.
+    const request = mapNode({ ...node, status: 'pending', credential_issued_at: 0 })
+    expect(request.awaitingApproval).toBe(true)
+
+    // A member: approved and holding a credential, but not seen yet.
+    const member = mapNode({
+      ...node,
+      status: 'pending',
+      credential_issued_at: Math.floor(Date.now() / 1000) - 30,
+      credential_not_after: Math.floor(Date.now() / 1000) + 86_400,
+    })
+    expect(member.awaitingApproval).toBe(false)
+  })
 })
 
 describe('mapPolicy', () => {

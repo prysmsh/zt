@@ -391,6 +391,10 @@ export function mapNode(node: ControllerNode): MeshNode {
     tags: node.tags,
     fingerprint: node.fingerprint,
     endpoint: undefined,
+    // A pending status means one of two things: a join request nobody
+    // approved yet, or a member holding a credential that has not
+    // checked in. Only the first is a decision awaiting the operator.
+    awaitingApproval: node.credential_issued_at === 0 && node.status === 'pending',
   }
 }
 

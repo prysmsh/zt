@@ -236,7 +236,7 @@ function NodeTable({
               <td>{node.platform}</td>
               {onApprove || onReject ? (
                 <td>
-                  {node.status === 'pending' ? (
+                  {node.awaitingApproval ? (
                     <span className="cell-actions">
                       {onApprove ? (
                         <button
@@ -532,9 +532,9 @@ function NodesPage({
   const scopeName = scope ? networks.find((network) => network.id === scope)?.name : undefined
 
   // The cleanup for a flood of fake join requests: one call instead of
-  // one click each. The count is over the whole tenant, because the
-  // endpoint is tenant-wide.
-  const pendingCount = data.nodes.filter((node) => node.status === 'pending').length
+  // one click each. The count is of join requests — members that hold a
+  // credential but have not checked in yet are not up for rejection.
+  const pendingCount = data.nodes.filter((node) => node.awaitingApproval).length
   const [rejecting, setRejecting] = useState(false)
 
   const handleApprove = async (node: MeshNode) => {
