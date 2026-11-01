@@ -58,13 +58,18 @@ const adminNav: Array<{ id: Page; label: string; icon: typeof Activity }> = [
  * from `VITE_ZT_TENANT` in development, and from the authenticated
  * session in production.
  */
-function useTenantContext(): { tenant: Tenant | null; loading: boolean; error: string | null } {
+function useTenantContext(
+  session: Session | null,
+): { tenant: Tenant | null; loading: boolean; error: string | null } {
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const admin = createAdminClient()
+    // The tenant list comes from the master console API, so it needs the
+    // operator's token. Without it the list request is refused and the
+    // console has no tenant to work against.
+    const admin = createAdminClient('/api/v1', () => session?.credential ?? null)
     const wanted = import.meta.env.VITE_ZT_TENANT as string | undefined
 
     async function resolve() {
@@ -82,6 +87,10 @@ function useTenantContext(): { tenant: Tenant | null; loading: boolean; error: s
           return
         }
         setTenant(match)
+        // A previous attempt may have failed, for example before the
+        // session existed. The error is cleared once the tenant resolves,
+        // so a stale failure is not reported as the current state.
+        setError(null)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Unable to reach the control plane')
       } finally {
@@ -90,7 +99,7 @@ function useTenantContext(): { tenant: Tenant | null; loading: boolean; error: s
     }
 
     void resolve()
-  }, [])
+  }, [session])
 
   return { tenant, loading, error }
 }
@@ -112,8 +121,8 @@ function useTenantApi(
       return { api: createFixtureClient(), live: false }
     }
     const baseUrl = import.meta.env.VITE_ZT_CONTROLLER_URL
-    const tokenProvider = () => session?.accessToken ?? null
-    return { api: createHttpClient(tenant?.id ?? 'default', baseUrl, tokenProvider), live: true }
+    const tokenProvider = () => session?.credential ?? null
+    return { api: createHttpClient(tenant?.id ?? '', baseUrl, tokenProvider), live: true }
   }, [tenant, session])
 }
 
@@ -754,11 +763,11 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => initializeTheme())
   const [session, setSession] = useState<Session | null>(() => loadSession())
   const adminApi = useMemo(
-    () => createAdminClient('/api/v1', () => session?.accessToken ?? null),
+    () => createAdminClient('/api/v1', () => session?.credential ?? null),
     [session],
   )
   const adminState = useAdminData(adminApi)
-  const tenantContext = useTenantContext()
+  const tenantContext = useTenantContext(session)
   const { api, live } = useTenantApi(tenantContext.tenant, session)
   const { state, error, data, refreshing, lastUpdated, refresh } = useControllerData(api)
 
@@ -925,13 +934,19 @@ export default function App() {
 
         <div className="content">
           {state === 'loading' ? <LoadingView /> : null}
+          {tenantContext.error ? (
+            <ErrorView
+              message={tenantContext.error}
+              onRetry={refresh}
+            />
+          ) : null}
           {state === 'error' ? (
             <ErrorView message={error ?? 'The controller did not respond.'} onRetry={refresh} />
           ) : null}
           {state === 'ready' && error ? (
             <StaleBanner message={`Showing cached data — ${error}`} onRetry={refresh} />
           ) : null}
-          {state === 'ready' ? content : null}
+          {state === 'ready' && !tenantContext.error ? content : null}
         </div>
       </main>
     </div>

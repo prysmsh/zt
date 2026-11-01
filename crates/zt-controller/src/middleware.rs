@@ -136,36 +136,45 @@ pub async fn require_auth(
         Tier::Public => next.run(request).await,
 
         Tier::Tenant => {
-            let Some(path_tenant) = tenant_of(&path) else {
-                return AuthRejection::from(AuthError::Forbidden(
-                    "the request does not name a tenant".into(),
-                ))
-                .into_response();
-            };
+            // An operator may reach any tenant. The master console is how
+            // an operator administers a tenant other than their own, so
+            // refusing them here would make the console unable to do its
+            // job.
+            let is_operator = identity.has_role(&state.operator_scope)
+                || identity.has_scope(&state.operator_scope);
 
-            // The token must name a tenant, and it must be the tenant in the
-            // path. A token without a tenant claim cannot address any
-            // tenant-scoped route.
-            let Some(token_tenant) = identity.tenant_id.as_deref() else {
-                return AuthRejection::from(AuthError::Forbidden(
-                    "this token does not belong to a tenant".into(),
-                ))
-                .into_response();
-            };
+            if !is_operator {
+                let Some(path_tenant) = tenant_of(&path) else {
+                    return AuthRejection::from(AuthError::Forbidden(
+                        "the request does not name a tenant".into(),
+                    ))
+                    .into_response();
+                };
 
-            if token_tenant != path_tenant {
-                return AuthRejection::from(AuthError::Forbidden(
-                    "this token cannot access another tenant".into(),
-                ))
-                .into_response();
-            }
+                // The token must name a tenant, and it must be the tenant in
+                // the path. A token without a tenant claim cannot address
+                // any tenant-scoped route.
+                let Some(token_tenant) = identity.tenant_id.as_deref() else {
+                    return AuthRejection::from(AuthError::Forbidden(
+                        "this token does not belong to a tenant".into(),
+                    ))
+                    .into_response();
+                };
 
-            if !identity.has_scope(&state.tenant_scope) && !identity.has_role(&state.operator_scope) {
-                return AuthRejection::from(AuthError::Forbidden(format!(
-                    "this token is missing the {} scope",
-                    state.tenant_scope
-                )))
-                .into_response();
+                if token_tenant != path_tenant {
+                    return AuthRejection::from(AuthError::Forbidden(
+                        "this token cannot access another tenant".into(),
+                    ))
+                    .into_response();
+                }
+
+                if !identity.has_scope(&state.tenant_scope) {
+                    return AuthRejection::from(AuthError::Forbidden(format!(
+                        "this token is missing the {} scope",
+                        state.tenant_scope
+                    )))
+                    .into_response();
+                }
             }
 
             next.run(request).await

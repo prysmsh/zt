@@ -111,14 +111,25 @@ roles in the ID token.
 
 ```sql
 INSERT INTO scopes (tenant_id, id, resource_id, name, description)
-VALUES ('admin', 'zt-op-scope-000001', '<resource-id>', 'zt:operator',
+VALUES ('default', 'zt-op-scope-000001', '<resource-id>', 'zt:operator',
         'Access to the ZT-next master console.');
 ```
 
-The resource must be the one the console's token is minted for. Its
-indicator is the `ZT_OIDC_AUDIENCE` value.
+### 3. The resource server
 
-### 3. The role
+The API is a resource server. Registering it lets the console ask for a
+token scoped to it, and lets the controller verify the token's audience.
+
+```sql
+INSERT INTO resources (tenant_id, id, name, indicator, is_default, access_token_ttl)
+VALUES ('default', 'zt-console-api-res', 'ZT Console API',
+        'https://zt.hardening.dev/api', false, 3600);
+```
+
+Without a resource server, the provider issues an **opaque** access token.
+The controller verifies JWTs, so an opaque token is rejected.
+
+### 4. The role
 
 Logto resolves an application's scopes through its roles, so the role is
 what actually grants access.
@@ -135,10 +146,19 @@ INSERT INTO users_roles (tenant_id, id, user_id, role_id)
 VALUES ('default', 'zt-ur-0000000000001', '<user-id>', 'zt-operator-role-001');
 ```
 
-The role's `tenant_id` must match the tenant that owns the scope. The
-scope's `tenant_id` must match the tenant that owns the resource. A
-mismatch is silent: the role exists, the token is issued, and the claim is
-simply missing.
+### The tenant must match
+
+The resource, its scopes, the role, and the application must all live in
+the tenant that serves the request. The provider resolves the resource
+against the requesting tenant's rows, and the rows are protected by
+row-level security, so a resource in another tenant is simply invisible.
+
+A mismatch is silent. The application is registered, the sign-in works,
+the token is issued, and the claim is missing — or the token is opaque, or
+the scope is dropped.
+
+The console's own `ZT_OIDC_AUDIENCE` must be the resource's indicator, so
+the controller verifies the audience the token actually carries.
 
 ### Verifying
 

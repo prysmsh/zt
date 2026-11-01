@@ -19,7 +19,15 @@ export interface OidcConfig {
   issuer: string
   /** The SPA application's client identifier. */
   clientId: string
-  /** The API resource the token is minted for. */
+  /**
+   * The API resource the token is minted for.
+   *
+   * This is the audience the controller verifies. When it is an absolute
+   * URI it is also sent as the `resource` parameter, which is how the
+   * provider knows which resource server the token is for. A bare
+   * identifier is not a valid resource indicator, so it is only ever sent
+   * when it looks like a URL.
+   */
   audience: string
   /** Where the provider sends the browser back to. */
   redirectUri: string
@@ -29,9 +37,21 @@ export interface OidcConfig {
 
 /** The token and its metadata. */
 export interface Session {
-  accessToken: string
+  /**
+   * The bearer credential the API accepts.
+   *
+   * This is the ID token, not the access token. The provider issues an
+   * opaque access token for this flow, and the controller verifies JWTs, so
+   * the ID token is the one that can be checked against the provider's
+   * signing keys. It carries the same facts the API needs: the subject,
+   * the roles, the audience, and the expiry.
+   */
+  credential: string
+  /** The ID token, as issued. */
   idToken: string
-  /** When the access token expires, as a Unix timestamp in seconds. */
+  /** The access token, as issued. */
+  accessToken: string
+  /** When the credential expires, as a Unix timestamp in seconds. */
   expiresAt: number
   /** The roles the provider granted. */
   roles: string[]
@@ -64,7 +84,7 @@ export function oidcConfig(env: Record<string, string | undefined> = import.meta
   return {
     issuer,
     clientId: env.VITE_ZT_OIDC_CLIENT_ID ?? 'zt-console-app-001',
-    audience: env.VITE_ZT_OIDC_AUDIENCE ?? 'zt-console-app-001',
+    audience: env.VITE_ZT_OIDC_AUDIENCE ?? 'https://zt.hardening.dev/api',
     redirectUri: env.VITE_ZT_OIDC_REDIRECT_URI ?? `${origin}${CALLBACK_PATH}`,
     // The roles scope is what makes the provider put the user's roles in
     // the ID token. The console reads them to decide whether the operator
@@ -138,11 +158,26 @@ export async function beginSignIn(config: OidcConfig, returnTo = '/'): Promise<v
   url.searchParams.set('state', state)
   url.searchParams.set('code_challenge', challenge)
   url.searchParams.set('code_challenge_method', 'S256')
-  // The audience is requested as a resource, which is how this provider
-  // mints a token for the API.
-  url.searchParams.set('resource', config.audience)
+
+  // The resource indicator must be an absolute URI. A bare identifier is
+  // not one, and the provider rejects it.
+  const resource = resourceIndicator(config.audience)
+  if (resource) {
+    url.searchParams.set('resource', resource)
+  }
 
   window.location.assign(url.toString())
+}
+
+/**
+ * The resource indicator for an audience, when there is one.
+ *
+ * RFC 8707 defines the resource parameter as an absolute URI. When the
+ * audience is a bare identifier, the provider derives the audience from
+ * the client, and no resource parameter is sent.
+ */
+function resourceIndicator(audience: string): string | null {
+  return /^https?:\/\//i.test(audience) ? audience : null
 }
 
 /**
@@ -174,8 +209,14 @@ export async function completeSignIn(config: OidcConfig): Promise<Session> {
     redirect_uri: config.redirectUri,
     client_id: config.clientId,
     code_verifier: pending.verifier,
-    resource: config.audience,
   })
+
+  // The resource parameter is echoed on the exchange only when it was sent
+  // on the authorization request.
+  const resource = resourceIndicator(config.audience)
+  if (resource) {
+    body.set('resource', resource)
+  }
 
   const response = await fetch(`${config.issuer}/token`, {
     method: 'POST',
@@ -234,6 +275,10 @@ function sessionFromTokens(tokens: {
   const tenantId = typeof claims.tenant_id === 'string' ? claims.tenant_id : undefined
 
   return {
+    // The ID token is the credential. The access token this provider
+    // issues for the authorization code flow is opaque, so it cannot be
+    // verified against the provider's signing keys.
+    credential: tokens.id_token,
     accessToken: tokens.access_token,
     idToken: tokens.id_token,
     expiresAt: Math.floor(Date.now() / 1000) + tokens.expires_in,

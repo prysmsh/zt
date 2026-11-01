@@ -305,6 +305,32 @@ async fn a_token_without_a_tenant_cannot_reach_any_tenant() {
 }
 
 #[tokio::test]
+async fn an_operator_token_reaches_any_tenant() {
+    let (app, keys) = authenticated_app().await;
+
+    // The master console is how an operator administers a tenant other
+    // than their own, so the operator role reaches every tenant.
+    let token = mint(
+        &keys,
+        serde_json::Map::from_iter([("roles".to_string(), json!(["zt:operator"]))]),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(authorized("/api/v1/t/acme/networks", &token))
+        .await
+        .unwrap();
+    assert_eq!(status_of(response).await, StatusCode::OK);
+
+    // And a tenant it does not own.
+    let response = app
+        .oneshot(authorized("/api/v1/t/globex/networks", &token))
+        .await
+        .unwrap();
+    assert_eq!(status_of(response).await, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_tenant_token_without_the_tenant_scope_is_rejected() {
     let (app, keys) = authenticated_app().await;
 
