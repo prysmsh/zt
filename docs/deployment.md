@@ -383,8 +383,10 @@ Every node must then re-enroll.
 - **The master console has no per-action audit of who did what.** The
   controller records the action and the tenant, but the acting operator is
   not yet attached to the audit entry.
-- **There is no data plane.** The controller issues credentials and the
-  nodes exchange packets, but there is no TUN device, so traffic does not
-  actually route between the nodes.
-- **The Tailscale dialect is not wire-compatible.** It uses BLAKE3 where
-  upstream uses BLAKE2s.
+- **The interface is not configured by the agent.** The data plane routes
+  packets between the nodes, but the virtual interface has to be set up by
+  the operating system before the agent runs.
+- **The Tailscale dialect is not wire-compatible end to end.** The
+  handshake now matches upstream exactly — it is checked against a
+  handshake captured from the Linux kernel's WireGuard implementation — but
+  there is no control plane for a `tailscaled` peer to be pointed at.
