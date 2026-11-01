@@ -29,8 +29,8 @@ use crate::model::{
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
-    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantStatus,
-    TenantUsage, UsageSummary,
+    exceeded_limit, new_tenant, rates_for_plan, Deployment, Invoice, Tenant, TenantLimits,
+    TenantStatus, TenantUsage, UsageSummary, Proration, ProrationPeriod,
 };
 
 /// How long a node may go without a sighting before it counts as offline.
@@ -283,6 +283,47 @@ impl Controller {
             .ok_or(ControllerError::NotFound("tenant"))?;
 
         if let Some(plan) = plan {
+            // A plan change is prorated: the old rate applies for the
+            // time the tenant was on the old plan, and the new rate for
+            // the rest. The record of that split is on the tenant, so the
+            // invoice can use it.
+            if tenant.plan != plan {
+                let now = now_unix();
+                let (period_start, period_end) = month_bounds(now);
+                let elapsed = now.saturating_sub(period_start);
+                let total = period_end.saturating_sub(period_start);
+
+                // The fraction of the period already elapsed, in parts per
+                // million, so the proration does not lose precision.
+                let elapsed_ppm = if total == 0 {
+                    0
+                } else {
+                    ((elapsed as u128) * 1_000_000 / (total as u128)) as u64
+                };
+
+                // The previous rates apply for the elapsed time.
+                let previous = Proration {
+                    plan: tenant.plan.clone(),
+                    node_month_cents: tenant.rates.node_month_cents,
+                    gigabyte_cents: tenant.rates.gigabyte_cents,
+                    elapsed_ppm,
+                };
+
+                // The new rates apply for the remaining time.
+                let rates = rates_for_plan(&plan);
+                let remaining = Proration {
+                    plan: plan.clone(),
+                    node_month_cents: rates.node_month_cents,
+                    gigabyte_cents: rates.gigabyte_cents,
+                    elapsed_ppm: 1_000_000 - elapsed_ppm,
+                };
+
+                tenant.proration = Some(ProrationPeriod {
+                    previous,
+                    current: remaining,
+                });
+            }
+
             tenant.plan = plan;
         }
         if let Some(limits) = limits {
@@ -827,6 +868,7 @@ impl Controller {
             traffic_charges_cents,
             total_cents: node_charges_cents.saturating_add(traffic_charges_cents),
             currency: rates.currency,
+            paid: false,
         })
     }
 

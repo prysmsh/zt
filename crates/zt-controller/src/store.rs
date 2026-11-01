@@ -305,6 +305,7 @@ impl SqliteStore {
                     plan: row.get(5)?,
                     limits,
                     rates,
+                    proration: None,
                     controller_id: row.get(8)?,
                     controller_public_key: row.get(9)?,
                     created_at: row.get::<_, i64>(10)? as u64,

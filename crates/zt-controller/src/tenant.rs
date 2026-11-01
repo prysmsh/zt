@@ -56,6 +56,10 @@ pub struct Tenant {
     pub limits: TenantLimits,
     /// What the tenant is charged for.
     pub rates: TenantRates,
+    /// The prorated split for the current period, when the plan changed
+    /// mid-period.
+    #[serde(default)]
+    pub proration: Option<ProrationPeriod>,
     /// The controller identity for a shared tenant.
     ///
     /// `None` for a dedicated tenant, whose controller holds its own key.
@@ -217,6 +221,57 @@ pub struct Invoice {
     pub total_cents: u64,
     /// The currency the amounts are in.
     pub currency: String,
+    /// Whether the tenant has paid this invoice.
+    pub paid: bool,
+}
+
+/// The rates that go with a plan.
+///
+/// The price is written once per plan, so the invoice follows the plan
+/// rather than being written by hand.
+pub fn rates_for_plan(plan: &str) -> TenantRates {
+    match plan {
+        // The hosted plan: a managed control plane and metering.
+        "hosted" => TenantRates {
+            node_month_cents: 1200,
+            gigabyte_cents: 2,
+            currency: "EUR".to_string(),
+        },
+        // A dedicated controller in a chosen region.
+        "dedicated" => TenantRates {
+            node_month_cents: 4800,
+            gigabyte_cents: 8,
+            currency: "EUR".to_string(),
+        },
+        // Self-hosted: the protocol is free, the platform does not charge.
+        _ => TenantRates {
+            node_month_cents: 0,
+            gigabyte_cents: 0,
+            currency: "EUR".to_string(),
+        },
+    }
+}
+
+/// One side of a prorated period: which rates applied, for how much of it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Proration {
+    /// The plan the rates belong to.
+    pub plan: String,
+    /// The price of one node for a month, in cents.
+    pub node_month_cents: u64,
+    /// The price of one gigabyte relayed, in cents.
+    pub gigabyte_cents: u64,
+    /// How much of the period this side covers, in parts per million.
+    pub elapsed_ppm: u64,
+}
+
+/// The two sides of a prorated period.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProrationPeriod {
+    /// The rates that applied before the change.
+    pub previous: Proration,
+    /// The rates that apply after the change.
+    pub current: Proration,
 }
 
 /// Whether a usage snapshot exceeds any of a tenant's limits.
@@ -247,6 +302,7 @@ pub fn new_tenant(
     limits: TenantLimits,
 ) -> Tenant {
     let now = now_unix();
+    let rates = rates_for_plan(&plan);
     Tenant {
         id: uuid::Uuid::new_v4().to_string(),
         name,
@@ -255,7 +311,8 @@ pub fn new_tenant(
         status: TenantStatus::Provisioning,
         plan,
         limits,
-        rates: TenantRates::default(),
+        rates,
+        proration: None,
         controller_id: None,
         controller_public_key: None,
         created_at: now,
