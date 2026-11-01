@@ -87,10 +87,6 @@ export function SignInGate({ onSignedIn }: { onSignedIn: (session: Session) => v
           <LogIn size={15} />
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-
-        <p className="auth-footnote">
-          Authentication is handled by {config.issuer.replace(/\/oidc$/, '')}.
-        </p>
       </div>
     </div>
   )

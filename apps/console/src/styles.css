@@ -828,12 +828,6 @@ tbody tr:hover { background: var(--panel-hover); }
   height: 34px;
 }
 
-.auth-footnote {
-  margin: 18px 0 0;
-  font-size: 10px;
-  color: var(--muted);
-}
-
 .spin {
   animation: zt-spin 900ms linear infinite;
 }
