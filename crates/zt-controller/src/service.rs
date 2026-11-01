@@ -1407,6 +1407,73 @@ impl Controller {
     }
 
     /// Revoke a node and refuse future renewal.
+    /// Delete a node outright.
+    ///
+    /// Only a revoked node can be deleted: revocation is the operator's
+    /// decision, deletion is the cleanup after it. The audit events
+    /// reference the node by name and identifier, so the trail survives
+    /// the row.
+    pub async fn delete_node(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<()> {
+        let mut state = self.inner.state.write().await;
+        let node = state
+            .nodes
+            .get(id)
+            .filter(|node| node.tenant_id == tenant_id)
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        if node.status != NodeStatus::Revoked {
+            return Err(ControllerError::Conflict(
+                "only a revoked node can be deleted — revoke it first".to_string(),
+            ));
+        }
+
+        let name = node.name.clone();
+        state.nodes.remove(id);
+        state.record_for_tenant(
+            Some(tenant_id),
+            "node.deleted",
+            "node",
+            id,
+            actor.display(),
+            format!("Deleted {name}"),
+        );
+        self.persist(&state).await?;
+        Ok(())
+    }
+
+    /// Delete every revoked node for a tenant.
+    ///
+    /// This is the cleanup for a list full of dead rows. Returns how
+    /// many were deleted.
+    pub async fn delete_revoked_nodes(&self, tenant_id: &str, actor: &Actor) -> Result<usize> {
+        let mut state = self.inner.state.write().await;
+
+        let dead: Vec<EntityId> = state
+            .nodes
+            .values()
+            .filter(|node| node.tenant_id == tenant_id && node.status == NodeStatus::Revoked)
+            .map(|node| node.id.clone())
+            .collect();
+
+        let deleted = dead.len();
+        for id in dead {
+            state.nodes.remove(&id);
+        }
+
+        if deleted > 0 {
+            state.record_for_tenant(
+                Some(tenant_id),
+                "node.deleted",
+                "node",
+                "-",
+                actor.display(),
+                format!("Deleted {deleted} revoked nodes"),
+            );
+            self.persist(&state).await?;
+        }
+        Ok(deleted)
+    }
+
     /// Revoke several nodes at once.
     ///
     /// This is what the console's selection does when the operator picks

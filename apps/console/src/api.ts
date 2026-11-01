@@ -113,6 +113,10 @@ export interface ApiClient {
   rejectPendingNodes(): Promise<number>
   /** Revoke a picked set of nodes. Returns how many changed. */
   revokeNodes(ids: string[]): Promise<number>
+  /** Delete a revoked node outright. The row is gone for good. */
+  deleteNode(nodeId: string): Promise<void>
+  /** Delete every revoked node at once. Returns how many. */
+  deleteRevokedNodes(): Promise<number>
   /** Approve a pending node, which lets it collect its credential. */
   approveNode(nodeId: string): Promise<MeshNode>
   renewCredential(nodeId: string): Promise<EnrollNodeResult>
@@ -309,6 +313,16 @@ export function createHttpClient(
         },
       )
       return result.revoked
+    },
+    async deleteNode(nodeId) {
+      await request<void>(`${tenantBase}/nodes/${encodeURIComponent(nodeId)}/delete`, { method: 'POST' })
+    },
+    async deleteRevokedNodes() {
+      const result = await request<{ deleted: number }>(
+        `${tenantBase}/nodes/delete-revoked`,
+        { method: 'POST' },
+      )
+      return result.deleted
     },
     async approveNode(nodeId) {
       const result = await request<{ node: ControllerNode }>(

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, RotateCw, X } from 'lucide-react'
+import { KeyRound, RotateCw, Trash2, X } from 'lucide-react'
 
 import type { MeshNode } from '../types'
 
@@ -16,6 +16,7 @@ export function NodeInspector({
   onClose,
   onRenew,
   onRevoke,
+  onDelete,
   busy,
 }: {
   node: MeshNode
@@ -23,13 +24,17 @@ export function NodeInspector({
   onClose: () => void
   onRenew: () => void
   onRevoke: () => void
+  /** Delete a revoked node outright. Omitted for live nodes. */
+  onDelete?: () => void
   busy: boolean
 }) {
   const [confirmingRevoke, setConfirmingRevoke] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
-  // A different node was picked, so the confirmation does not carry over.
+  // A different node was picked, so the confirmations do not carry over.
   useEffect(() => {
     setConfirmingRevoke(false)
+    setConfirmingDelete(false)
   }, [node.id])
 
   useEffect(() => {
@@ -109,6 +114,32 @@ export function NodeInspector({
             Revoking withdraws access. The node cannot renew its credential, and it stops being part
             of the mesh.
           </p>
+        ) : null}
+        {onDelete && node.status === 'revoked' ? (
+          <>
+            <button
+              type="button"
+              className="button danger"
+              disabled={busy}
+              onClick={() => {
+                if (confirmingDelete) {
+                  onDelete()
+                  return
+                }
+                setConfirmingDelete(true)
+              }}
+              onBlur={() => setConfirmingDelete(false)}
+            >
+              <Trash2 size={14} />
+              {confirmingDelete ? 'Confirm delete' : 'Delete'}
+            </button>
+            {confirmingDelete ? (
+              <p className="inspector-note">
+                Deleting removes the node from the console for good. The activity page keeps the
+                record of it.
+              </p>
+            ) : null}
+          </>
         ) : null}
       </div>
     </aside>

@@ -386,6 +386,24 @@ export function createFixtureClient(): ApiClient {
       }
       return revoked
     },
+    async deleteNode(nodeId) {
+      await delay()
+      const node = controllerNodes.find((item) => item.id === nodeId)
+      if (!node) throw new Error('node not found')
+      if (node.status !== 'revoked') throw new Error('only a revoked node can be deleted')
+      controllerNodes.splice(controllerNodes.indexOf(node), 1)
+    },
+    async deleteRevokedNodes() {
+      await delay()
+      let deleted = 0
+      for (let index = controllerNodes.length - 1; index >= 0; index -= 1) {
+        if (controllerNodes[index].status === 'revoked') {
+          controllerNodes.splice(index, 1)
+          deleted += 1
+        }
+      }
+      return deleted
+    },
     async approveNode(nodeId) {
       await delay()
       const node = controllerNodes.find((item) => item.id === nodeId)

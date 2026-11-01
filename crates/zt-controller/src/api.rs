@@ -104,6 +104,17 @@ fn build_router(controller: Controller) -> Router {
             "/api/v1/t/{tenant}/nodes/bulk-revoke",
             post(bulk_revoke_nodes),
         )
+        // Deletion is the cleanup after revocation, so it has its own
+        // verb-less routes rather than overloading DELETE, which has
+        // meant revoke since before deletion existed.
+        .route(
+            "/api/v1/t/{tenant}/nodes/delete-revoked",
+            post(delete_revoked_nodes),
+        )
+        .route(
+            "/api/v1/t/{tenant}/nodes/{id}/delete",
+            post(delete_node),
+        )
         .route(
             "/api/v1/t/{tenant}/nodes/{id}",
             get(get_node).delete(revoke_node),
@@ -453,6 +464,28 @@ async fn bulk_revoke_nodes(
         .revoke_nodes_bulk(&tenant, &request.ids, &principal.actor())
         .await?;
     Ok(Json(serde_json::json!({ "revoked": revoked })))
+}
+
+/// Delete one revoked node outright.
+async fn delete_node(
+    State(controller): State<Controller>,
+    principal: Principal,
+    Path((tenant, id)): Path<(String, String)>,
+) -> Result<StatusCode, ControllerError> {
+    controller.delete_node(&tenant, &id, &principal.actor()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete every revoked node for the tenant at once.
+async fn delete_revoked_nodes(
+    State(controller): State<Controller>,
+    principal: Principal,
+    Path(tenant): Path<String>,
+) -> Result<Json<serde_json::Value>, ControllerError> {
+    let deleted = controller
+        .delete_revoked_nodes(&tenant, &principal.actor())
+        .await?;
+    Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
 async fn tenant_billing(

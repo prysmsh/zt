@@ -671,7 +671,20 @@ function NodesPage({
   // one click each. The count is of join requests — members that hold a
   // credential but have not checked in yet are not up for rejection.
   const pendingCount = data.nodes.filter((node) => node.awaitingApproval).length
+  const revokedCount = data.nodes.filter((node) => node.status === 'revoked').length
   const [rejecting, setRejecting] = useState(false)
+  const [clearing, setClearing] = useState(false)
+
+  const handleClearRevoked = async () => {
+    setClearing(true)
+    try {
+      await api.deleteRevokedNodes()
+      setChecked(new Set())
+      onChanged()
+    } finally {
+      setClearing(false)
+    }
+  }
 
   // Selection. A row's checkbox is the only thing that toggles it; the
   // rest of the row still opens the inspector.
@@ -743,6 +756,11 @@ function NodesPage({
               Reject pending ({pendingCount})
             </button>
           ) : null}
+          {revokedCount > 0 ? (
+            <button type="button" className="button" onClick={handleClearRevoked} disabled={clearing}>
+              Clear revoked ({revokedCount})
+            </button>
+          ) : null}
           <button type="button" className="button primary" onClick={() => setEnrolling(true)}>
             <Plus size={15} />
             Add node
@@ -785,23 +803,43 @@ function NodesPage({
       {checkedIds.length > 0 ? (
         <div className="selection-bar" role="toolbar" aria-label="Selected nodes">
           <span className="selection-count">{checkedIds.length} selected</span>
-          <button
-            type="button"
-            className="button"
-            disabled={busy || checkedIds.every((node) => node.status === 'revoked')}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await api.revokeNodes(checkedIds.map((node) => node.id))
-                setChecked(new Set())
-                onChanged()
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            Revoke
-          </button>
+          {checkedIds.every((node) => node.status === 'revoked') ? (
+            <button
+              type="button"
+              className="button danger"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await Promise.all(checkedIds.map((node) => api.deleteNode(node.id)))
+                  setChecked(new Set())
+                  onChanged()
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Delete
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button"
+              disabled={busy || checkedIds.every((node) => node.status === 'revoked')}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await api.revokeNodes(checkedIds.map((node) => node.id))
+                  setChecked(new Set())
+                  onChanged()
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Revoke
+            </button>
+          )}
           <button type="button" className="button" onClick={() => setChecked(new Set())}>
             Clear
           </button>
@@ -854,6 +892,16 @@ function NodesPage({
             setBusy(true)
             try {
               await api.revokeNode(selected.id)
+              setSelected(null)
+              onChanged()
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onDelete={async () => {
+            setBusy(true)
+            try {
+              await api.deleteNode(selected.id)
               setSelected(null)
               onChanged()
             } finally {

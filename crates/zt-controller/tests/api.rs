@@ -423,6 +423,126 @@ async fn bulk_revoke_skips_foreign_and_already_revoked_nodes() {
 }
 
 #[tokio::test]
+async fn deleting_a_node_requires_revocation_first_and_frees_the_row() {
+    let app = app();
+    let tenant_id = tenant(&app, "Acme").await;
+    let network_id = network(&app, &tenant_id, "Production", "10.42.0.0/24").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    async fn enroll(app: axum::Router, tenant_id: String, network_id: String, name: &str, key: u8) -> String {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/t/{tenant_id}/nodes"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "network_id": network_id,
+                            "name": name,
+                            "public_key": hex::encode([key; 32])
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        json_body(response).await["node"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    let junk = enroll(app.clone(), tenant_id.clone(), network_id.clone(), "junk", 40).await;
+    let member = enroll(app.clone(), tenant_id.clone(), network_id, "member", 41).await;
+
+    // Deleting a live node is refused: revocation is the decision, and
+    // deletion is only the cleanup after it.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{member}/delete"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    // Revoke, then delete. The row is gone for good.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{junk}/revoke"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{junk}/delete"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{junk}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // The member is untouched, and "clear revoked" reports one and
+    // leaves it alone.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/delete-revoked"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["deleted"], 0);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/{member}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json_body(response).await["status"], "pending");
+}
+
+#[tokio::test]
 async fn enrollment_rejects_invalid_public_key() {
     let app = app();
     let tenant = tenant(&app, "Acme").await;
