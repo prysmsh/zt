@@ -25,6 +25,7 @@ USAGE:
 
 COMMANDS:
     enroll     Enroll this node with a controller and store its credential
+    join       Ask to join and wait for the operator to approve
     adopt      Store a credential an operator issued for this node
     renew      Renew the credential if it is due for renewal
     status     Show the node's enrollment and credential status
@@ -34,7 +35,7 @@ COMMANDS:
 
 OPTIONS:
     --controller <URL>    Controller base URL (default: http://127.0.0.1:8080)
-    --tenant <SLUG>       Tenant the node belongs to (required for enroll)
+    --tenant <SLUG>       Tenant the node belongs to (required for enroll, join)
     --network <ID>        Network to join (required for enroll)
     --name <NAME>         Human-readable node name (required for enroll)
     --tags <A,B>          Comma-separated tags

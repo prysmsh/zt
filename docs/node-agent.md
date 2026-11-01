@@ -51,6 +51,7 @@ Renewed credential for web-01
 | Command | What it does |
 |---|---|
 | `enroll` | Register with a controller and store the credential |
+| `join` | Ask to join and wait for the operator to approve |
 | `adopt` | Store a credential an operator issued for this node |
 | `renew` | Renew the credential, if it is due |
 | `status` | Show enrollment state and credential expiry |
@@ -155,6 +156,33 @@ Adopted the credential for web-01
 
 `zt-agent enroll` remains for controllers that permit a node to enrol
 itself, such as a first-run controller on a private network.
+
+## Joining by request
+
+The copy-a-key flow above needs the operator to touch both machines. The
+join flow removes the copy: the host asks, the operator decides, and the
+host collects its credential on its own.
+
+```console
+$ zt-agent join --controller https://zt.example.dev \
+    --tenant acme --network <network-id> --name laptop-01
+Asked to join acme — waiting for the operator to approve it in the console...
+Joined laptop-01 in network 3f9506c4-7710-483d-bcfc-9a6b9630818d
+  node id:   0d32c965-7de5-4f30-ac67-4ce0776e1683
+  address:   94e4bef4fcc70214ffa3
+  state:     /home/user/zt-node.json
+```
+
+On the console's Nodes page the host appears as pending with an Approve
+button. Approving marks the node as accepted; the waiting host then polls
+with a signature over its own identifier, made with the key it joined
+with, and collects a credential bound to that same key. The console never
+handles the credential, and a host whose operator says no simply stays
+pending with no access at all.
+
+The poll signature is what makes the exchange safe to leave open: knowing
+the tenant slug and the network identifier lets a host *ask*, but only the
+holder of the private key can *collect*.
 
 ## The HTTP client
 

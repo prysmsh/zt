@@ -59,6 +59,14 @@ key. The credential is short-lived and renewed before it lapses. A revoked
 node cannot renew, and a credential replayed from another node is refused
 because the binding is checked.
 
+A node can also join by request. The host asks with its public keys
+alone, sits in pending with no access, and the operator approves it from
+the console. The host then collects its credential by polling with a
+signature over its own identifier, made with the key it joined with —
+so only the holder of the private key can collect, and the console never
+handles the credential. Both paths end in the same place: a short-lived
+credential bound to the node's key.
+
 ### Audit trail
 
 Every administrative mutation is recorded with the actor that made it, the
