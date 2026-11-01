@@ -35,6 +35,12 @@ pub struct Claims {
     /// The subject — the user or service that authenticated.
     #[serde(default)]
     pub sub: String,
+    /// The display name of the subject, when the provider supplies one.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The preferred username of the subject, when the provider supplies one.
+    #[serde(default)]
+    pub preferred_username: Option<String>,
     /// The issuer that signed the token.
     #[serde(default)]
     pub iss: String,
@@ -315,6 +321,10 @@ fn unpadded(input: &str) -> String {
 pub struct Identity {
     /// The subject of the token.
     pub subject: String,
+    /// The display name of the subject, when the provider supplies one.
+    pub name: Option<String>,
+    /// The preferred username of the subject, when the provider supplies one.
+    pub preferred_username: Option<String>,
     /// The tenant the token belongs to, if it is a tenant-scoped token.
     pub tenant_id: Option<String>,
     /// The scopes the token carries.
@@ -332,6 +342,20 @@ impl Identity {
     /// Whether the identity has a role.
     pub fn has_role(&self, role: &str) -> bool {
         self.roles.iter().any(|granted| granted == role)
+    }
+
+    /// The actor this identity acts as.
+    ///
+    /// The display name falls back to the preferred username, so an
+    /// operator is recognisable in the audit log even when the provider
+    /// supplies no name.
+    pub fn actor(&self) -> crate::model::Actor {
+        crate::model::Actor::principal(
+            self.subject.clone(),
+            self.name
+                .clone()
+                .or_else(|| self.preferred_username.clone()),
+        )
     }
 }
 
@@ -382,6 +406,8 @@ mod tests {
     fn scopes_and_roles_are_split() {
         let claims = Claims {
             sub: "user".into(),
+            name: None,
+            preferred_username: None,
             iss: "issuer".into(),
             aud: "audience".into(),
             tenant_id: Some("acme".into()),
@@ -398,6 +424,8 @@ mod tests {
     fn absent_claims_do_not_panic() {
         let claims = Claims {
             sub: "user".into(),
+            name: None,
+            preferred_username: None,
             iss: String::new(),
             aud: String::new(),
             tenant_id: None,

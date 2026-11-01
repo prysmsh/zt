@@ -169,6 +169,55 @@ pub enum RelayStatus {
     Draining,
 }
 
+/// Who performed an action.
+///
+/// The actor is the authenticated principal that made the request. An action
+/// the controller takes on its own behalf is attributed to the system, so
+/// the audit log never has an empty actor.
+///
+/// The subject is the identity's stable identifier. The name is what the
+/// operator is called, and it is only present when the identity provider
+/// supplies one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Actor {
+    subject: String,
+    name: Option<String>,
+}
+
+impl Actor {
+    /// An action the controller took on its own behalf.
+    pub fn system() -> Self {
+        Self {
+            subject: "system".to_string(),
+            name: None,
+        }
+    }
+
+    /// An authenticated principal.
+    pub fn principal(subject: impl Into<String>, name: Option<String>) -> Self {
+        Self {
+            subject: subject.into(),
+            name: name.filter(|value| !value.trim().is_empty()),
+        }
+    }
+
+    /// The stable identifier of the actor.
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// How the actor appears in the audit log.
+    ///
+    /// A named principal is shown by name, with the subject in brackets, so
+    /// the log is readable and the identity is still unambiguous.
+    pub fn display(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{name} [{}]", self.subject),
+            None => self.subject.clone(),
+        }
+    }
+}
+
 /// An append-only audit event.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditEvent {
@@ -178,10 +227,20 @@ pub struct AuditEvent {
     pub action: String,
     pub target_type: String,
     pub target_id: String,
+    /// Who performed the action.
     pub actor: String,
     pub detail: String,
     pub timestamp: u64,
 }
+
+/// The scope a tenant-scoped token must carry.
+///
+/// The name is the one the identity provider uses, so the scope a token
+/// carries is the same name the controller checks for.
+pub const TENANT_SCOPE: &str = "zt:tenant";
+
+/// The role that grants access to the master console.
+pub const OPERATOR_ROLE: &str = "zt:operator";
 
 /// Controller health summary.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

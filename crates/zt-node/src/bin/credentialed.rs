@@ -320,7 +320,7 @@ fn http_request(
     };
     let address = format!("{host}:{port}");
     let path = url
-        .split_once(&authority)
+        .split_once(authority)
         .map(|(_, rest)| {
             if rest.is_empty() {
                 "/".to_string()

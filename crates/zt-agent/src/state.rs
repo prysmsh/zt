@@ -158,6 +158,15 @@ impl NodeState {
             .map_err(|error| AgentError::Credential(error.to_string()))
     }
 
+    /// The credential, hex encoded, if the node has enrolled.
+    pub fn credential_hex(&self) -> Option<String> {
+        if self.credential.is_empty() {
+            None
+        } else {
+            Some(self.credential.clone())
+        }
+    }
+
     /// Whether the credential has expired.
     pub fn credential_expired(&self, now_unix: u64) -> bool {
         now_unix >= self.credential_not_after

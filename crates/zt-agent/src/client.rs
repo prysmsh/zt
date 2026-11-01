@@ -3,6 +3,9 @@
 //! This is the client side of the control-plane API. It is deliberately
 //! small and dependency-light: the node agent only needs to enroll, renew,
 //! and report status.
+//!
+//! The controller is normally reached over HTTPS, through a reverse proxy,
+//! so the client speaks TLS and follows redirects.
 
 use std::time::Duration;
 
@@ -82,14 +85,32 @@ struct TenantList {
     items: Vec<TenantInfo>,
 }
 
+/// A network as the controller reports it.
+#[derive(Clone, Debug, Deserialize)]
+pub struct NetworkInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub cidr: String,
+    pub credential_ttl_secs: u32,
+}
+
+#[derive(Deserialize)]
+struct NetworkList {
+    items: Vec<NetworkInfo>,
+}
+
 /// A minimal blocking HTTP client for the controller API.
 ///
-/// The node agent does its control-plane work rarely, so a blocking client
-/// keeps the dependency footprint and the failure modes small.
+/// The node authenticates with the credential the controller issued it. The
+/// credential is signed by the controller and bound to the node's own key,
+/// so the node holds no secret.
 pub struct ControllerClient {
     base_url: String,
     tenant: String,
     timeout: Duration,
+    /// The credential presented on every request.
+    credential: Option<String>,
 }
 
 impl ControllerClient {
@@ -101,7 +122,26 @@ impl ControllerClient {
             base_url,
             tenant: tenant.into(),
             timeout: Duration::from_secs(10),
+            credential: None,
         }
+    }
+
+    /// Set the credential the client presents.
+    ///
+    /// The node authenticates with the credential the controller issued it.
+    /// The credential is signed by the controller and bound to the node's
+    /// own key, so the node holds no secret.
+    pub fn with_credential(mut self, credential: impl Into<String>) -> Self {
+        self.credential = Some(credential.into());
+        self
+    }
+
+    /// Replace the credential the client presents.
+    ///
+    /// The credential changes when the node enrolls or renews, so the
+    /// client is updated rather than rebuilt.
+    pub fn set_credential(&mut self, credential: impl Into<String>) {
+        self.credential = Some(credential.into());
     }
 
     /// Set the request timeout.
@@ -179,11 +219,20 @@ impl ControllerClient {
         self.post(&self.tenant_url("nodes"), &body)
     }
 
+    /// Ask the controller which node this credential belongs to.
+    ///
+    /// This is how a node learns its own identifier, which it needs to
+    /// renew its credential.
+    pub fn self_node(&self) -> Result<ControllerNode> {
+        self.get(&self.tenant_url("nodes/self"))
+    }
+
     /// Renew a node's credential.
     pub fn renew_credential(&self, node_id: &str) -> Result<EnrollResponse> {
+        let body = serde_json::json!({});
         self.post(
             &self.tenant_url(&format!("nodes/{node_id}/credential")),
-            &serde_json::json!({}),
+            &body,
         )
     }
 
@@ -200,217 +249,79 @@ impl ControllerClient {
 
     /// Revoke a node.
     pub fn revoke_node(&self, node_id: &str) -> Result<()> {
+        let body = serde_json::json!({});
         self.post::<serde_json::Value>(
             &self.tenant_url(&format!("nodes/{node_id}/revoke")),
-            &serde_json::json!({}),
+            &body,
         )
         .map(|_| ())
     }
 
+    /// Send a GET request and decode the JSON response.
     fn get<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T> {
-        let request = format!("GET {url} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nConnection: close\r\n\r\n");
-        let response = self.round_trip(&request)?;
-        parse_body(&response)
+        let mut request = ureq::get(url).timeout(self.timeout);
+        if let Some(credential) = &self.credential {
+            request = request.set("Authorization", &format!("Bearer {credential}"));
+        }
+
+        let response = request
+            .call()
+            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
+
+        decode(response)
     }
 
     /// Send a POST request and decode the JSON response.
+    ///
+    /// This is public so a caller can reach a route the client does not
+    /// model yet, without waiting for a release.
     pub fn post<T: for<'de> Deserialize<'de>>(
         &self,
         url: &str,
         body: &serde_json::Value,
     ) -> Result<T> {
-        let payload = serde_json::to_string(body)
-            .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
-        let request = format!(
-            "POST {url} HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
-            payload.len()
-        );
-        let response = self.round_trip(&request)?;
-        parse_body(&response)
-    }
-
-    /// Send a request over TCP and read the whole response.
-    fn round_trip(&self, request: &str) -> Result<Vec<u8>> {
-        use std::io::{ErrorKind, Read, Write};
-        use std::net::TcpStream;
-
-        let host_port = self
-            .base_url
-            .trim_start_matches("http://")
-            .trim_start_matches("https://")
-            .trim_end_matches('/');
-        let address = if host_port.contains(':') {
-            host_port.to_string()
-        } else {
-            format!("{host_port}:80")
-        };
-
-        let mut stream = TcpStream::connect(&address)
-            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
-        stream
-            .set_read_timeout(Some(self.timeout))
-            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
-        stream
-            .set_write_timeout(Some(self.timeout))
-            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
-
-        stream
-            .write_all(request.as_bytes())
-            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
-        stream
-            .flush()
-            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
-
-        // The response is read against its Content-Length when the server
-        // provides one. Relying on the connection close alone is unreliable,
-        // because a server that half-closes leaves the socket readable until
-        // the read timeout fires, which surfaces as a spurious error.
-        let mut buffer = Vec::new();
-        let mut chunk = [0u8; 8192];
-        let mut expected: Option<usize> = None;
-        let mut header_end: Option<usize> = None;
-
-        loop {
-            match stream.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(count) => {
-                    buffer.extend_from_slice(&chunk[..count]);
-
-                    if header_end.is_none() {
-                        header_end = find_header_end(&buffer);
-                        if let Some(end) = header_end {
-                            expected = content_length(&buffer[..end]);
-                            // Everything up to the body has arrived.
-                            if let Some(length) = expected {
-                                if buffer.len() >= end + length {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
-                    ) =>
-                {
-                    // A timeout is only acceptable once the whole body has
-                    // arrived. Otherwise the response is incomplete.
-                    match (header_end, expected) {
-                        (Some(end), Some(length)) if buffer.len() >= end + length => break,
-                        _ => {
-                            return Err(ClientError::Unreachable(format!(
-                                "timed out reading the response: {error}"
-                            )))
-                        }
-                    }
-                }
-                Err(error) => return Err(ClientError::Unreachable(error.to_string())),
-            }
+        let mut request = ureq::post(url).timeout(self.timeout);
+        if let Some(credential) = &self.credential {
+            request = request.set("Authorization", &format!("Bearer {credential}"));
         }
 
-        Ok(buffer)
+        let response = request
+            .send_json(body.clone())
+            .map_err(|error| ClientError::Unreachable(error.to_string()))?;
+
+        decode(response)
     }
 }
 
-/// Find the end of the HTTP headers.
-///
-/// Returns the index just past the blank line that separates the headers
-/// from the body.
-fn find_header_end(buffer: &[u8]) -> Option<usize> {
-    buffer.windows(4).position(|window| window == b"\r\n\r\n").map(|index| index + 4)
-}
-
-/// Read the `Content-Length` header value.
-fn content_length(headers: &[u8]) -> Option<usize> {
-    let text = String::from_utf8_lossy(headers);
-    for line in text.lines() {
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        if name.trim().eq_ignore_ascii_case("content-length") {
-            return value.trim().parse().ok();
-        }
-    }
-    None
-}
-
-/// A network as the controller reports it.
-#[derive(Clone, Debug, Deserialize)]
-pub struct NetworkInfo {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub cidr: String,
-    pub credential_ttl_secs: u32,
-}
-
-#[derive(Deserialize)]
-struct NetworkList {
-    items: Vec<NetworkInfo>,
-}
-
-#[derive(Deserialize)]
-struct ErrorBody {
-    error: String,
-}
-
-/// Parse an HTTP response and extract its JSON body.
-fn parse_body<T: for<'de> Deserialize<'de>>(response: &[u8]) -> Result<T> {
-    let text = String::from_utf8_lossy(response);
-    let (head, body) = text
-        .split_once("\r\n\r\n")
-        .ok_or_else(|| ClientError::InvalidResponse("malformed response".into()))?;
-
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse::<u16>().ok())
-        .unwrap_or(0);
+/// Decode a response body, turning an error status into an error.
+fn decode<T: for<'de> Deserialize<'de>>(response: ureq::Response) -> Result<T> {
+    let status = response.status();
+    let text = response
+        .into_string()
+        .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
 
     if !(200..300).contains(&status) {
-        let message = serde_json::from_str::<ErrorBody>(body)
-            .map(|parsed| parsed.error)
-            .unwrap_or_else(|_| format!("HTTP {status}"));
+        // The controller answers with {"error": "..."}. Anything else is
+        // reported as the status, so the operator still sees what happened.
+        let message = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect());
+
         return Err(ClientError::Api { status, message });
     }
 
-    serde_json::from_str(body).map_err(|error| ClientError::InvalidResponse(error.to_string()))
+    serde_json::from_str(&text).map_err(|error| ClientError::InvalidResponse(error.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn an_error_response_is_reported() {
-        let response = b"HTTP/1.1 404 Not Found\r\n\r\n{\"error\":\"network not found\"}";
-        let result: Result<NetworkInfo> = parse_body(response);
-        match result {
-            Err(ClientError::Api { status, message }) => {
-                assert_eq!(status, 404);
-                assert_eq!(message, "network not found");
-            }
-            other => panic!("unexpected result: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_success_response_is_parsed() {
-        let response = b"HTTP/1.1 200 OK\r\n\r\n{\"id\":\"n1\",\"name\":\"Prod\",\"description\":\"\",\"cidr\":\"10.0.0.0/24\",\"credential_ttl_secs\":86400}";
-        let result: Result<NetworkInfo> = parse_body(response);
-        let network = result.expect("parse");
-        assert_eq!(network.name, "Prod");
-        assert_eq!(network.credential_ttl_secs, 86400);
-    }
-
-    #[test]
-    fn a_malformed_response_is_rejected() {
-        let result: Result<NetworkInfo> = parse_body(b"garbage");
-        assert!(matches!(result, Err(ClientError::InvalidResponse(_))));
-    }
 
     #[test]
     fn the_tenant_url_is_scoped() {
@@ -422,29 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn the_header_end_is_found() {
-        let response = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}";
-        let expected = response
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .expect("separator")
-            + 4;
-        assert_eq!(find_header_end(response), Some(expected));
-    }
-
-    #[test]
-    fn the_content_length_is_read() {
-        let headers = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 42\r\n\r\n";
-        assert_eq!(content_length(headers), Some(42));
-
-        // A response without a length is read until the connection closes.
-        let headers = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n";
-        assert_eq!(content_length(headers), None);
-    }
-
-    #[test]
-    fn a_header_without_a_colon_does_not_stop_the_scan() {
-        let headers = b"HTTP/1.1 200 OK\r\nmalformed-header\r\ncontent-length: 7\r\n\r\n";
-        assert_eq!(content_length(headers), Some(7));
+    fn a_trailing_slash_is_trimmed() {
+        let client = ControllerClient::new("http://localhost:8080/", "acme");
+        assert_eq!(
+            client.tenant_url("nodes"),
+            "http://localhost:8080/api/v1/t/acme/nodes"
+        );
     }
 }

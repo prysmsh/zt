@@ -22,12 +22,15 @@ use axum::Json;
 use serde_json::json;
 
 use crate::auth::{bearer_token, AuthError, Identity, Verifier};
+use crate::service::Controller;
 
 /// The shared state the middleware needs.
 #[derive(Clone)]
 pub struct AuthState {
     /// The token verifier.
     pub verifier: Arc<Verifier>,
+    /// The controller, which verifies a node's own credential.
+    pub controller: Controller,
     /// The scope a tenant-scoped token must carry.
     pub tenant_scope: String,
     /// The scope an operator token must carry.
@@ -106,7 +109,7 @@ fn tenant_of(path: &str) -> Option<&str> {
 pub async fn require_auth(
     State(state): State<AuthState>,
     headers: HeaderMap,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
@@ -120,17 +123,29 @@ pub async fn require_auth(
         return AuthRejection::from(AuthError::Missing).into_response();
     };
 
-    let claims = match state.verifier.verify(token).await {
-        Ok(claims) => claims,
-        Err(error) => return AuthRejection::from(error).into_response(),
+    // A node authenticates with the credential the controller issued it.
+    // The credential is signed by this controller and bound to the node's
+    // own key, so it needs no shared secret and cannot be replayed by
+    // another node.
+    let identity = match state.controller.authenticate_node(token).await {
+        Ok(identity) => identity,
+        Err(_) => match state.verifier.verify(token).await {
+            Ok(claims) => Identity {
+                subject: claims.sub.clone(),
+                name: claims.name.clone(),
+                preferred_username: claims.preferred_username.clone(),
+                tenant_id: claims.tenant_id.clone(),
+                scopes: claims.scopes().iter().map(|scope| scope.to_string()).collect(),
+                roles: claims.roles().iter().map(|role| role.to_string()).collect(),
+            },
+            Err(error) => return AuthRejection::from(error).into_response(),
+        },
     };
 
-    let identity = Identity {
-        subject: claims.sub.clone(),
-        tenant_id: claims.tenant_id.clone(),
-        scopes: claims.scopes().iter().map(|scope| scope.to_string()).collect(),
-        roles: claims.roles().iter().map(|role| role.to_string()).collect(),
-    };
+    // The identity is handed to the handler through the request extensions,
+    // so the handler can attribute its audit events to the caller without
+    // reaching into ambient state.
+    request.extensions_mut().insert(identity.clone());
 
     match tier_of(&path) {
         Tier::Public => next.run(request).await,

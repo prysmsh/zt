@@ -1,5 +1,6 @@
 //! Tests for controller persistence and tenant isolation.
 
+use zt_controller::Actor;
 use std::sync::Arc;
 
 use zt_controller::{Controller, Deployment, IdentityStore, SqliteStore, TenantLimits};
@@ -18,6 +19,7 @@ async fn tenant(controller: &Controller, name: &str) -> String {
             Deployment::Shared,
             "starter".into(),
             TenantLimits::default(),
+            &Actor::system(),
         )
         .await
         .expect("tenant")
@@ -38,6 +40,7 @@ async fn sqlite_store_round_trips_controller_state() {
             "Core services".into(),
             "10.42.0.0/24".into(),
             Some(3600),
+            &Actor::system(),
         )
         .await
         .expect("network");
@@ -50,6 +53,7 @@ async fn sqlite_store_round_trips_controller_state() {
             "web-01".into(),
             node_public_key,
             vec!["web".into()],
+            &Actor::system(),
         )
         .await
         .expect("node");
@@ -73,6 +77,7 @@ async fn sqlite_store_round_trips_controller_state() {
                 created_at: 0,
                 updated_at: 0,
             },
+            &Actor::system(),
         )
         .await
         .expect("policy");
@@ -92,6 +97,7 @@ async fn sqlite_store_round_trips_controller_state() {
                 created_at: 0,
                 updated_at: 0,
             },
+            &Actor::system(),
         )
         .await
         .expect("relay");
@@ -141,15 +147,20 @@ async fn node_status_survives_reload() {
             String::new(),
             "10.0.0.0/24".into(),
             None,
+            &Actor::system(),
         )
         .await
         .expect("network");
     let (node, _) = controller
-        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![])
+        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![],
+            &Actor::system(),
+        )
         .await
         .expect("node");
     controller
-        .revoke_node(&tenant_id, &node.id)
+        .revoke_node(&tenant_id, &node.id,
+            &Actor::system(),
+        )
         .await
         .expect("revoke");
 
@@ -171,16 +182,21 @@ async fn deleting_network_removes_scoped_objects() {
             String::new(),
             "10.0.0.0/24".into(),
             None,
+            &Actor::system(),
         )
         .await
         .expect("network");
     controller
-        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![])
+        .enroll_node(&tenant_id, &network.id, "node-1".into(), [1u8; 32], vec![],
+            &Actor::system(),
+        )
         .await
         .expect("node");
 
     controller
-        .delete_network(&tenant_id, &network.id)
+        .delete_network(&tenant_id, &network.id,
+            &Actor::system(),
+        )
         .await
         .expect("delete");
 
@@ -248,6 +264,7 @@ async fn state_survives_a_restart_using_the_same_database_file() {
             "Core services".into(),
             "10.42.0.0/24".into(),
             None,
+            &Actor::system(),
         )
         .await
         .expect("network");
@@ -258,6 +275,7 @@ async fn state_survives_a_restart_using_the_same_database_file() {
             "web-01".into(),
             [4u8; 32],
             vec!["web".into()],
+            &Actor::system(),
         )
         .await
         .ok();
@@ -291,6 +309,7 @@ async fn migrating_an_existing_database_is_idempotent() {
                 String::new(),
                 "10.0.0.0/24".into(),
                 None,
+                &Actor::system(),
             )
             .await
             .expect("network");

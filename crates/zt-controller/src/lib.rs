@@ -17,6 +17,7 @@ pub mod auth;
 pub mod error;
 pub mod identity;
 pub mod middleware;
+pub mod principal;
 pub mod model;
 pub mod service;
 pub mod store;
@@ -26,10 +27,11 @@ pub use api::{router, router_with_auth};
 pub use auth::{AuthConfig, Verifier};
 pub use error::{ControllerError, Result};
 pub use middleware::AuthState;
+pub use principal::Principal;
 pub use identity::IdentityStore;
 pub use model::{
-    AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, PortSpec, Protocol,
-    Relay, RelayStatus, Selector,
+    Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, PortSpec,
+    Protocol, Relay, RelayStatus, Selector,
 };
 pub use service::{Controller, SharedController, DEFAULT_CREDENTIAL_TTL_SECS};
 pub use store::{MemoryStore, SqliteStore, Store};

@@ -4,6 +4,7 @@
 //! control plane. These tests assert that a tenant can never observe or
 //! mutate another tenant's data, even when it knows the object IDs.
 
+use zt_controller::Actor;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{json, Value};
@@ -570,6 +571,7 @@ async fn a_tenant_can_find_itself_by_slug() {
             Deployment::Shared,
             "starter".into(),
             TenantLimits::default(),
+            &Actor::system(),
         )
         .await
         .expect("tenant");

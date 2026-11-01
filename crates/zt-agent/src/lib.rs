@@ -22,9 +22,10 @@ pub mod state;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use zt_crypto::credential::NodeCredential;
 use zt_crypto::membership::{ControllerTrust, Membership, TrustedController};
 
-pub use client::{ControllerClient, EnrollResponse};
+pub use client::{ControllerClient, ControllerNode, EnrollResponse};
 pub use error::{AgentError, Result};
 pub use state::{NodeState, default_state_path};
 
@@ -94,6 +95,14 @@ impl Agent {
             controller_id,
         )?;
 
+        // The client presents the node's credential, so the controller can
+        // tell which node is calling. A node that has not enrolled yet has
+        // no credential, and its first request is refused.
+        let client = match state.credential_hex() {
+            Some(credential) => client.with_credential(credential),
+            None => client,
+        };
+
         Ok(Self {
             config,
             client,
@@ -142,7 +151,70 @@ impl Agent {
             response.credential_not_after,
         );
         self.state.write(&self.config.state_path)?;
+        self.client.set_credential(&response.credential);
 
+        Ok(response)
+    }
+
+    /// Adopt a credential that an operator issued for this node.
+    ///
+    /// The controller authenticates a node with the credential it issued
+    /// it, so a node that was enrolled by an operator adopts that
+    /// credential instead of enrolling itself. The node then asks the
+    /// controller who it is, which is how it learns its own identifier.
+    ///
+    /// This is the path a real deployment takes: the operator enrols the
+    /// node from the console, and the credential is handed to the node.
+    pub fn adopt(&mut self, credential: &str) -> Result<ControllerNode> {
+        // The credential is verified against the pinned controller key
+        // before it is stored, so a wrong or foreign credential is refused
+        // rather than kept.
+        let parsed = NodeCredential::deserialize(
+            &hex::decode(credential)
+                .map_err(|_| AgentError::Credential("the credential is not hex".into()))?,
+            &self.state.controller_public_key()?,
+        )
+        .map_err(|error| AgentError::Credential(error.to_string()))?;
+
+        self.state.set_credential(
+            "",
+            "",
+            credential,
+            parsed.not_after(),
+        );
+        self.client.set_credential(credential);
+
+        // The controller knows which node the credential belongs to.
+        let node = self.client.self_node()?;
+        self.state.set_credential(
+            &node.id,
+            &node.network_id,
+            credential,
+            parsed.not_after(),
+        );
+        self.state.write(&self.config.state_path)?;
+
+        Ok(node)
+    }
+
+    /// Renew the credential now, whether it is due or not.
+    ///
+    /// The node has to know its own identifier to renew, which it learns
+    /// by adopting the credential the operator issued it.
+    pub fn renew_now(&mut self) -> Result<EnrollResponse> {
+        if self.state.node_id.is_empty() {
+            return Err(AgentError::NotEnrolled);
+        }
+
+        let response = self.client.renew_credential(&self.state.node_id)?;
+        self.state.set_credential(
+            &response.node.id,
+            &response.node.network_id,
+            &response.credential,
+            response.credential_not_after,
+        );
+        self.state.write(&self.config.state_path)?;
+        self.client.set_credential(&response.credential);
         Ok(response)
     }
 
@@ -165,6 +237,7 @@ impl Agent {
             response.credential_not_after,
         );
         self.state.write(&self.config.state_path)?;
+        self.client.set_credential(&response.credential);
         Ok(Some(response))
     }
 

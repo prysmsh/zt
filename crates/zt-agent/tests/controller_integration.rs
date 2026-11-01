@@ -16,10 +16,66 @@ use zt_controller::{router, Controller, IdentityStore, SqliteStore};
 /// A controller running on a loopback port for the duration of a test.
 struct TestController {
     address: SocketAddr,
+    /// The controller, so a test can reach the service layer directly.
+    controller: Controller,
     _data_dir: tempfile::TempDir,
 }
 
 impl TestController {
+    /// Start a controller that requires authentication.
+    ///
+    /// A node's credential authenticates it, because the controller issued
+    /// it. No other token is accepted, so the test exercises the node's
+    /// own path through the API.
+    async fn start_authenticated() -> TestController {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let identity_path = data_dir.path().join("controller.key");
+        let database_path = data_dir.path().join("controller.db");
+
+        let identity = IdentityStore::new(&identity_path).load_or_create().expect("identity");
+        let store = Arc::new(SqliteStore::open(&database_path).expect("store"));
+        let controller = Controller::with_store(identity, store).expect("controller");
+
+        let state = zt_controller::AuthState {
+            // The verifier points nowhere, so no provider token is accepted.
+            verifier: std::sync::Arc::new(zt_controller::Verifier::new(
+                zt_controller::AuthConfig::new(
+                    "https://issuer.invalid",
+                    "https://audience.invalid",
+                    "https://issuer.invalid/jwks",
+                ),
+            )),
+            controller: controller.clone(),
+            tenant_scope: "zt:tenant".to_string(),
+            operator_scope: "zt:operator".to_string(),
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let address = listener.local_addr().expect("addr");
+
+        let served = controller.clone();
+        tokio::spawn(async move {
+            let app = zt_controller::router_with_auth(served, state);
+            let _ = axum::serve(listener, app).await;
+        });
+
+        for _ in 0..100 {
+            match tokio::net::TcpStream::connect(address).await {
+                Ok(stream) => {
+                    drop(stream);
+                    break;
+                }
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        }
+
+        TestController {
+            address,
+            controller,
+            _data_dir: data_dir,
+        }
+    }
+
     async fn start() -> TestController {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let identity_path = data_dir.path().join("controller.key");
@@ -32,8 +88,9 @@ impl TestController {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let address = listener.local_addr().expect("addr");
 
+        let served = controller.clone();
         tokio::spawn(async move {
-            let app = router(controller);
+            let app = router(served);
             let _ = axum::serve(listener, app).await;
         });
 
@@ -51,6 +108,7 @@ impl TestController {
 
         TestController {
             address,
+            controller,
             _data_dir: data_dir,
         }
     }
@@ -262,4 +320,84 @@ async fn a_tenant_slug_resolves_to_the_tenant_id() {
 
     // An unknown tenant is an error, not a silent fallback.
     assert!(client.resolve_tenant("no-such-tenant").is_err());
+}
+
+// The agent's HTTP client is blocking, so the server needs its own threads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_node_adopts_a_credential_an_operator_issued() {
+    let controller = TestController::start_authenticated().await;
+
+    // The operator enrols the node and hands it the credential. The setup
+    // goes through the service layer, because this controller has no
+    // operator token; the operator's own token is not what this test is
+    // about.
+    let tenant = controller
+        .controller
+        .create_tenant(
+            "Agent Test".into(),
+            "agent-test".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("create tenant");
+    let tenant_id = tenant.id.clone();
+
+    let network = controller
+        .controller
+        .create_network(
+            &tenant_id,
+            "Agent Net".into(),
+            String::new(),
+            "10.77.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("create network");
+    let network_id = network.id.clone();
+
+    // The credential is what the operator would hand over. The enrolment
+    // goes through the service layer, because the operator's own token is
+    // not what this test is about.
+    let (enrolled_node, credential) = controller
+        .controller
+        .enroll_node(
+            &tenant_id,
+            &network_id,
+            "web-01".into(),
+            [0xab; 32],
+            Vec::new(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("enrol");
+    let credential = hex::encode(credential.serialize());
+
+    // The node adopts it. The controller authenticates the node with the
+    // credential, so this proves the credential works as a bearer token.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state_path = dir.path().join("node.json");
+
+    let mut agent = Agent::open(AgentConfig {
+        controller_url: controller.url(),
+        tenant: tenant_id,
+        network_id,
+        state_path,
+        ..Default::default()
+    })
+    .expect("open");
+
+    let node = agent.adopt(&credential).expect("adopt");
+    assert_eq!(node.id, enrolled_node.id);
+    assert_eq!(node.name, "web-01");
+
+    // The agent now knows who it is, so it can renew.
+    let renewed = agent.renew_now().expect("renew");
+    assert_ne!(
+        renewed.credential, credential,
+        "a renewal issues a new credential"
+    );
 }

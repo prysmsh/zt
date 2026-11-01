@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "ZT-next controller listening"
     );
 
-    let app = match auth_state().await? {
+    let app = match auth_state(&controller).await? {
         Some(state) => {
             tracing::info!("authentication enabled");
             router_with_auth(controller, state)
@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Build the auth state from the environment, if it is configured.
-async fn auth_state() -> Result<Option<AuthState>, Box<dyn std::error::Error>> {
+async fn auth_state(controller: &Controller) -> Result<Option<AuthState>, Box<dyn std::error::Error>> {
     let issuer = match std::env::var("ZT_OIDC_ISSUER") {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
         _ => return Ok(None),
@@ -121,6 +121,7 @@ async fn auth_state() -> Result<Option<AuthState>, Box<dyn std::error::Error>> {
 
     Ok(Some(AuthState {
         verifier: Arc::new(Verifier::new(config)),
+        controller: controller.clone(),
         tenant_scope,
         operator_scope: std::env::var("ZT_OIDC_OPERATOR_ROLE")
             .ok()

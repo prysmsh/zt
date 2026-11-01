@@ -25,6 +25,7 @@ use serde_json::json;
 
 use crate::error::ControllerError;
 use crate::middleware::{require_auth, AuthState};
+use crate::principal::Principal;
 use crate::model::{Network, Node, Policy, Relay, Selector};
 use crate::service::{ControlPlaneHealth, Controller};
 use crate::tenant::{Deployment, Tenant, TenantLimits};
@@ -79,6 +80,9 @@ fn build_router(controller: Controller) -> Router {
             "/api/v1/t/{tenant}/nodes/{id}",
             get(get_node).delete(revoke_node),
         )
+        // A node asks who it is, using the credential it was issued. This
+        // is how a node learns its own identity without being told.
+        .route("/api/v1/t/{tenant}/nodes/self", get(get_self))
         .route(
             "/api/v1/t/{tenant}/nodes/{id}/credential",
             post(renew_credential),
@@ -176,6 +180,7 @@ fn default_plan() -> String {
 
 async fn create_tenant(
     State(controller): State<Controller>,
+    principal: Principal,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<(StatusCode, Json<Tenant>), ControllerError> {
     let tenant = controller
@@ -185,6 +190,7 @@ async fn create_tenant(
             request.deployment,
             request.plan,
             request.limits.unwrap_or_default(),
+            &principal.actor(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(tenant)))
@@ -198,12 +204,13 @@ struct UpdateTenantRequest {
 
 async fn update_tenant(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(id): Path<String>,
     Json(request): Json<UpdateTenantRequest>,
 ) -> Result<Json<Tenant>, ControllerError> {
     Ok(Json(
         controller
-            .update_tenant(&id, request.plan, request.limits)
+            .update_tenant(&id, request.plan, request.limits, &principal.actor())
             .await?,
     ))
 }
@@ -216,24 +223,27 @@ struct SuspendTenantRequest {
 
 async fn suspend_tenant(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(id): Path<String>,
     Json(request): Json<SuspendTenantRequest>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.suspend_tenant(&id, &request.reason).await?))
+    Ok(Json(controller.suspend_tenant(&id, &request.reason, &principal.actor()).await?))
 }
 
 async fn reactivate_tenant(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(id): Path<String>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.reactivate_tenant(&id).await?))
+    Ok(Json(controller.reactivate_tenant(&id, &principal.actor()).await?))
 }
 
 async fn delete_tenant(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(id): Path<String>,
 ) -> Result<Json<Tenant>, ControllerError> {
-    Ok(Json(controller.delete_tenant(&id).await?))
+    Ok(Json(controller.delete_tenant(&id, &principal.actor()).await?))
 }
 
 #[derive(Debug, Serialize)]
@@ -301,6 +311,7 @@ struct CreateNetworkRequest {
 
 async fn create_network(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(tenant): Path<String>,
     Json(request): Json<CreateNetworkRequest>,
 ) -> Result<(StatusCode, Json<Network>), ControllerError> {
@@ -311,6 +322,7 @@ async fn create_network(
             request.description,
             request.cidr,
             request.credential_ttl_secs,
+            &principal.actor(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(network)))
@@ -318,9 +330,10 @@ async fn create_network(
 
 async fn delete_network(
     State(controller): State<Controller>,
+    principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<StatusCode, ControllerError> {
-    controller.delete_network(&tenant, &id).await?;
+    controller.delete_network(&tenant, &id, &principal.actor()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -362,8 +375,9 @@ struct EnrollNodeResponse {
 
 async fn enroll_node(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(tenant): Path<String>,
-    Json(request): Json<EnrollNodeRequest>,
+ Json(request): Json<EnrollNodeRequest>,
 ) -> Result<(StatusCode, Json<EnrollNodeResponse>), ControllerError> {
     let bytes = hex::decode(&request.public_key)
         .map_err(|_| ControllerError::InvalidRequest("public_key must be hex encoded".into()))?;
@@ -378,6 +392,7 @@ async fn enroll_node(
             request.name,
             public_key,
             request.tags,
+            &principal.actor(),
         )
         .await?;
 
@@ -398,11 +413,26 @@ async fn get_node(
     Ok(Json(controller.get_node(&tenant, &id).await?))
 }
 
+/// The node behind the request's credential.
+async fn get_self(
+    State(controller): State<Controller>,
+    Path(tenant): Path<String>,
+    principal: Principal,
+) -> Result<Json<Node>, ControllerError> {
+    // The credential is bound to the node's own key, and the subject of the
+    // token is the node's identifier, so the node is found by that subject.
+    let node = controller
+        .find_node_for_principal(&tenant, principal.subject())
+        .await?;
+    Ok(Json(node))
+}
+
 async fn revoke_node(
     State(controller): State<Controller>,
+    principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<Node>, ControllerError> {
-    Ok(Json(controller.revoke_node(&tenant, &id).await?))
+    Ok(Json(controller.revoke_node(&tenant, &id, &principal.actor()).await?))
 }
 
 #[derive(Debug, Serialize)]
@@ -414,9 +444,10 @@ struct CredentialResponse {
 
 async fn renew_credential(
     State(controller): State<Controller>,
+    principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<CredentialResponse>, ControllerError> {
-    let (node, credential) = controller.renew_node_credential(&tenant, &id).await?;
+    let (node, credential) = controller.renew_node_credential(&tenant, &id, &principal.actor()).await?;
     Ok(Json(CredentialResponse {
         node,
         credential: hex::encode(credential.serialize()),
@@ -462,6 +493,7 @@ fn default_true() -> bool {
 
 async fn create_policy(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(tenant): Path<String>,
     Json(request): Json<CreatePolicyRequest>,
 ) -> Result<(StatusCode, Json<Policy>), ControllerError> {
@@ -482,6 +514,7 @@ async fn create_policy(
                 created_at: 0,
                 updated_at: 0,
             },
+            &principal.actor(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(policy)))
@@ -489,9 +522,10 @@ async fn create_policy(
 
 async fn delete_policy(
     State(controller): State<Controller>,
+    principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<StatusCode, ControllerError> {
-    controller.delete_policy(&tenant, &id).await?;
+    controller.delete_policy(&tenant, &id, &principal.actor()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -523,6 +557,7 @@ struct CreateRelayRequest {
 
 async fn create_relay(
     State(controller): State<Controller>,
+    principal: Principal,
     Path(tenant): Path<String>,
     Json(request): Json<CreateRelayRequest>,
 ) -> Result<(StatusCode, Json<Relay>), ControllerError> {
@@ -541,6 +576,7 @@ async fn create_relay(
                 created_at: 0,
                 updated_at: 0,
             },
+            &principal.actor(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(relay)))
@@ -548,9 +584,10 @@ async fn create_relay(
 
 async fn drain_relay(
     State(controller): State<Controller>,
+    principal: Principal,
     Path((tenant, id)): Path<(String, String)>,
 ) -> Result<Json<Relay>, ControllerError> {
-    Ok(Json(controller.drain_relay(&tenant, &id).await?))
+    Ok(Json(controller.drain_relay(&tenant, &id, &principal.actor()).await?))
 }
 
 async fn list_events(

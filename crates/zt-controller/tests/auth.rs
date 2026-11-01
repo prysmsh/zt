@@ -121,13 +121,15 @@ async fn authenticated_app() -> (axum::Router, TestKeys) {
     let config = AuthConfig::new(ISSUER, AUDIENCE, format!("http://{address}/jwks"));
     let verifier = Arc::new(Verifier::new(config));
 
+    let controller = Controller::new().expect("controller");
+
     let state = AuthState {
+        controller: controller.clone(),
         verifier,
         tenant_scope: "zt:tenant".to_string(),
         operator_scope: "zt:operator".to_string(),
     };
 
-    let controller = Controller::new().expect("controller");
     (router_with_auth(controller, state), keys)
 }
 

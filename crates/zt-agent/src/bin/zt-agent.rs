@@ -24,6 +24,7 @@ USAGE:
 
 COMMANDS:
     enroll     Enroll this node with a controller and store its credential
+    adopt      Store a credential an operator issued for this node
     renew      Renew the credential if it is due for renewal
     status     Show the node's enrollment and credential status
     identity   Print the node's public key and address
@@ -34,6 +35,7 @@ OPTIONS:
     --network <ID>        Network to join (required for enroll)
     --name <NAME>         Human-readable node name (required for enroll)
     --tags <A,B>          Comma-separated tags
+    --credential <HEX>    The credential an operator issued (for adopt)
     --state <PATH>        Path to the node state file (default: zt-node.json)
     --force               Renew even when the credential is not yet due
     -h, --help            Print this help
@@ -73,6 +75,7 @@ struct Options {
     network: String,
     name: String,
     tags: Vec<String>,
+    credential: Option<String>,
     state: PathBuf,
     force: bool,
 }
@@ -86,6 +89,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
         network: String::new(),
         name: String::new(),
         tags: Vec::new(),
+        credential: None,
         state: PathBuf::from("zt-node.json"),
         force: false,
     };
@@ -99,7 +103,8 @@ fn parse(arguments: &[String]) -> Result<Options> {
                 std::process::exit(0);
             }
             "--force" => options.force = true,
-            "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state" => {
+            "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state"
+            | "--credential" => {
                 index += 1;
                 let value = arguments.get(index).ok_or_else(|| {
                     AgentError::Usage(format!("{argument} needs a value"))
@@ -117,6 +122,7 @@ fn parse(arguments: &[String]) -> Result<Options> {
                             .collect()
                     }
                     "--state" => options.state = PathBuf::from(value),
+                    "--credential" => options.credential = Some(value.clone()),
                     _ => unreachable!(),
                 }
             }
@@ -155,6 +161,7 @@ fn run(arguments: &[String]) -> Result<String> {
 
     match options.command.as_str() {
         "enroll" => enroll(options, config),
+        "adopt" => adopt(options, config),
         "renew" => renew(options, config),
         "status" => status(options, config),
         "identity" => identity(options, config),
@@ -184,6 +191,33 @@ fn enroll(options: Options, config: AgentConfig) -> Result<String> {
         response.node.id,
         response.node.address,
         timestamp(response.credential_not_after),
+        options.state.display(),
+    ))
+}
+
+/// Adopt a credential an operator issued for this node.
+///
+/// The controller authenticates a node with the credential it issued it, so
+/// a node that was enrolled by an operator adopts that credential. The node
+/// then asks the controller who it is, which is how it learns its own
+/// identifier.
+fn adopt(options: Options, config: AgentConfig) -> Result<String> {
+    let Some(credential) = options.credential else {
+        return Err(AgentError::Usage(
+            "--credential is required to adopt a credential".into(),
+        ));
+    };
+
+    let mut agent = Agent::open(config)?;
+    let node = agent.adopt(&credential)?;
+
+    Ok(format!(
+        "Adopted the credential for {}\n  node id:   {}\n  network:   {}\n  address:   {}\n  expires:   {}\n  state:     {}",
+        node.name,
+        node.id,
+        node.network_id,
+        node.address,
+        timestamp(node.credential_not_after),
         options.state.display(),
     ))
 }

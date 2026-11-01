@@ -21,8 +21,8 @@ use zt_crypto::identity::{Address, Identity};
 
 use crate::error::{ControllerError, Result};
 use crate::model::{
-    now_unix, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy, Relay,
-    RelayStatus,
+    now_unix, Actor, AuditEvent, ControllerState, Health, Network, Node, NodeStatus, Policy,
+    Relay, RelayStatus,
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
@@ -145,6 +145,7 @@ impl Controller {
         deployment: Deployment,
         plan: String,
         limits: TenantLimits,
+        actor: &Actor,
     ) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
 
@@ -169,7 +170,7 @@ impl Controller {
             "tenant.created",
             "tenant",
             &tenant.id,
-            "admin",
+            actor.display(),
             format!("Created tenant {}", tenant.name),
         );
 
@@ -184,6 +185,7 @@ impl Controller {
         id: &str,
         plan: Option<String>,
         limits: Option<TenantLimits>,
+        actor: &Actor,
     ) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
@@ -205,7 +207,7 @@ impl Controller {
             "tenant.updated",
             "tenant",
             id,
-            "admin",
+            actor.display(),
             format!("Updated tenant {}", updated.name),
         );
         self.persist(&state).await?;
@@ -217,7 +219,9 @@ impl Controller {
     /// A suspended tenant's credentials are no longer renewed, so its access
     /// lapses within one credential TTL. Its data is retained so the tenant
     /// can be restored.
-    pub async fn suspend_tenant(&self, id: &str, reason: &str) -> Result<Tenant> {
+    pub async fn suspend_tenant(&self, id: &str, reason: &str,
+        actor: &Actor,
+    ) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -234,7 +238,7 @@ impl Controller {
             "tenant.suspended",
             "tenant",
             id,
-            "admin",
+            actor.display(),
             if reason.is_empty() {
                 format!("Suspended tenant {}", suspended.name)
             } else {
@@ -246,7 +250,9 @@ impl Controller {
     }
 
     /// Restore a suspended tenant.
-    pub async fn reactivate_tenant(&self, id: &str) -> Result<Tenant> {
+    pub async fn reactivate_tenant(&self, id: &str,
+        actor: &Actor,
+    ) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -263,7 +269,7 @@ impl Controller {
             "tenant.reactivated",
             "tenant",
             id,
-            "admin",
+            actor.display(),
             format!("Reactivated tenant {}", restored.name),
         );
         self.persist(&state).await?;
@@ -274,7 +280,9 @@ impl Controller {
     ///
     /// The tenant's data is retained until a separate retention job purges
     /// it, so an accidental deletion can be reversed.
-    pub async fn delete_tenant(&self, id: &str) -> Result<Tenant> {
+    pub async fn delete_tenant(&self, id: &str,
+        actor: &Actor,
+    ) -> Result<Tenant> {
         let mut state = self.inner.state.write().await;
         let tenant = state
             .tenants
@@ -291,7 +299,7 @@ impl Controller {
             "tenant.deleted",
             "tenant",
             id,
-            "admin",
+            actor.display(),
             format!("Deleted tenant {}", deleted.name),
         );
         self.persist(&state).await?;
@@ -383,6 +391,7 @@ impl Controller {
         description: String,
         cidr: String,
         credential_ttl_secs: Option<u32>,
+        actor: &Actor,
     ) -> Result<Network> {
         self.check_tenant_limits(tenant_id, 1, 0, 0, 0).await?;
 
@@ -420,7 +429,7 @@ impl Controller {
             "network.created",
             "network",
             &network.id,
-            "admin",
+            actor.display(),
             format!("Created network {}", network.name),
         );
         state.networks.insert(network.id.clone(), network.clone());
@@ -429,7 +438,9 @@ impl Controller {
     }
 
     /// Delete a network and everything scoped to it.
-    pub async fn delete_network(&self, tenant_id: &str, id: &str) -> Result<()> {
+    pub async fn delete_network(&self, tenant_id: &str, id: &str,
+        actor: &Actor,
+    ) -> Result<()> {
         let mut state = self.inner.state.write().await;
 
         // Verify ownership before removing anything. Removing first and
@@ -458,7 +469,7 @@ impl Controller {
             "network.deleted",
             "network",
             id,
-            "admin",
+            actor.display(),
             format!("Deleted network {}", network.name),
         );
         self.persist(&state).await?;
@@ -496,6 +507,43 @@ impl Controller {
             .ok_or(ControllerError::NotFound("node"))
     }
 
+    /// Find the node that a credential belongs to.
+    ///
+    /// A node authenticates with the credential the controller issued it, so
+    /// this is how a node learns its own identity without being told.
+    pub async fn find_node_by_public_key(&self, public_key: &[u8; 32]) -> Result<Node> {
+        let hex_key = hex::encode(public_key);
+        self.inner
+            .state
+            .read()
+            .await
+            .nodes
+            .values()
+            .find(|node| node.public_key == hex_key)
+            .cloned()
+            .ok_or(ControllerError::NotFound("node"))
+    }
+
+    /// Find the node behind an authenticated principal, within a tenant.
+    ///
+    /// The principal is a node, identified by the subject the credential
+    /// was issued for.
+    pub async fn find_node_for_principal(
+        &self,
+        tenant_id: &str,
+        subject: &str,
+    ) -> Result<Node> {
+        self.inner
+            .state
+            .read()
+            .await
+            .nodes
+            .values()
+            .find(|node| node.tenant_id == tenant_id && node.id == subject)
+            .cloned()
+            .ok_or(ControllerError::NotFound("node"))
+    }
+
     /// Enroll a node for a tenant and issue its first credential.
     ///
     /// The node must present its Ed25519 public key. The controller derives
@@ -507,6 +555,7 @@ impl Controller {
         name: String,
         public_key: [u8; 32],
         tags: Vec<String>,
+        actor: &Actor,
     ) -> Result<(Node, NodeCredential)> {
         self.check_tenant_limits(tenant_id, 0, 1, 0, 0).await?;
 
@@ -569,7 +618,7 @@ impl Controller {
             "node.enrolled",
             "node",
             &node.id,
-            "admin",
+            actor.display(),
             format!("Enrolled {} in {}", node.name, network.name),
         );
         state.nodes.insert(node.id.clone(), node.clone());
@@ -578,7 +627,9 @@ impl Controller {
     }
 
     /// Revoke a node and refuse future renewal.
-    pub async fn revoke_node(&self, tenant_id: &str, id: &str) -> Result<Node> {
+    pub async fn revoke_node(&self, tenant_id: &str, id: &str,
+        actor: &Actor,
+    ) -> Result<Node> {
         let mut state = self.inner.state.write().await;
         let node = state
             .nodes
@@ -592,7 +643,7 @@ impl Controller {
             "node.revoked",
             "node",
             id,
-            "admin",
+            actor.display(),
             format!("Revoked {}", revoked.name),
         );
         self.persist(&state).await?;
@@ -604,6 +655,7 @@ impl Controller {
         &self,
         tenant_id: &str,
         id: &str,
+        actor: &Actor,
     ) -> Result<(Node, NodeCredential)> {
         let mut state = self.inner.state.write().await;
         let node = state
@@ -655,7 +707,7 @@ impl Controller {
             "credential.renewed",
             "node",
             id,
-            "node",
+            actor.display(),
             format!("Renewed credential for {}", renewed.name),
         );
         self.persist(&state).await?;
@@ -681,7 +733,9 @@ impl Controller {
     }
 
     /// Create a policy for a tenant.
-    pub async fn create_policy(&self, tenant_id: &str, policy: Policy) -> Result<Policy> {
+    pub async fn create_policy(&self, tenant_id: &str, policy: Policy,
+        actor: &Actor,
+    ) -> Result<Policy> {
         self.check_tenant_limits(tenant_id, 0, 0, 1, 0).await?;
 
         let mut state = self.inner.state.write().await;
@@ -704,7 +758,7 @@ impl Controller {
             "policy.created",
             "policy",
             &policy.id,
-            "admin",
+            actor.display(),
             format!("Created policy {}", policy.name),
         );
         state.policies.insert(policy.id.clone(), policy.clone());
@@ -713,7 +767,9 @@ impl Controller {
     }
 
     /// Delete a policy.
-    pub async fn delete_policy(&self, tenant_id: &str, id: &str) -> Result<()> {
+    pub async fn delete_policy(&self, tenant_id: &str, id: &str,
+        actor: &Actor,
+    ) -> Result<()> {
         let mut state = self.inner.state.write().await;
 
         // Verify ownership before removing anything.
@@ -735,7 +791,7 @@ impl Controller {
             "policy.deleted",
             "policy",
             id,
-            "admin",
+            actor.display(),
             format!("Deleted policy {}", policy.name),
         );
         self.persist(&state).await?;
@@ -760,7 +816,9 @@ impl Controller {
     }
 
     /// Create a relay for a tenant.
-    pub async fn create_relay(&self, tenant_id: &str, relay: Relay) -> Result<Relay> {
+    pub async fn create_relay(&self, tenant_id: &str, relay: Relay,
+        actor: &Actor,
+    ) -> Result<Relay> {
         self.check_tenant_limits(tenant_id, 0, 0, 0, 1).await?;
 
         let mut state = self.inner.state.write().await;
@@ -786,7 +844,7 @@ impl Controller {
             "relay.created",
             "relay",
             &relay.id,
-            "admin",
+            actor.display(),
             format!("Created relay {}", relay.name),
         );
         state.relays.insert(relay.id.clone(), relay.clone());
@@ -795,7 +853,9 @@ impl Controller {
     }
 
     /// Drain a relay before maintenance or shutdown.
-    pub async fn drain_relay(&self, tenant_id: &str, id: &str) -> Result<Relay> {
+    pub async fn drain_relay(&self, tenant_id: &str, id: &str,
+        actor: &Actor,
+    ) -> Result<Relay> {
         let mut state = self.inner.state.write().await;
         let relay = state
             .relays
@@ -810,7 +870,7 @@ impl Controller {
             "relay.draining",
             "relay",
             id,
-            "admin",
+            actor.display(),
             format!("Draining relay {}", drained.name),
         );
         self.persist(&state).await?;
@@ -820,6 +880,58 @@ impl Controller {
     // -------------------------------------------------------------------
     // Audit and health
     // -------------------------------------------------------------------
+
+    /// Authenticate a node by the credential this controller issued it.
+    ///
+    /// A node holds no secret. Its credential is signed by this controller
+    /// and bound to the node's own public key, so presenting it proves both
+    /// that the node is enrolled and that it is the node it claims to be.
+    /// Another node cannot replay it, because the binding is checked
+    /// against the credential's own key.
+    ///
+    /// The returned identity is scoped to the node's own tenant. It carries
+    /// the tenant scope, so the node can manage its own membership, and no
+    /// operator role, so it cannot reach the master console.
+    pub async fn authenticate_node(&self, token: &str) -> Result<crate::auth::Identity> {
+        let bytes = hex::decode(token)
+            .map_err(|_| ControllerError::InvalidRequest("the credential is not hex".into()))?;
+
+        let controller_key = self.inner.identity.public_key();
+        let credential = NodeCredential::deserialize(&bytes, &controller_key)
+            .map_err(|_| ControllerError::InvalidRequest("the credential is not valid".into()))?;
+
+        if !credential.is_valid_at(now_unix()) {
+            return Err(ControllerError::InvalidRequest(
+                "the credential has expired".into(),
+            ));
+        }
+
+        let state = self.inner.state.read().await;
+
+        // The node is found by the public key the credential is bound to.
+        // A credential for a node that was deleted or revoked matches
+        // nothing.
+        let node = state
+            .nodes
+            .values()
+            .find(|node| node.public_key == hex::encode(credential.public_key()))
+            .ok_or(ControllerError::NotFound("node"))?;
+
+        if node.status == NodeStatus::Revoked {
+            return Err(ControllerError::InvalidRequest(
+                "the node is revoked".into(),
+            ));
+        }
+
+        Ok(crate::auth::Identity {
+            subject: node.id.clone(),
+            name: Some(node.name.clone()),
+            preferred_username: None,
+            tenant_id: Some(node.tenant_id.clone()),
+            scopes: vec![crate::model::TENANT_SCOPE.to_string()],
+            roles: Vec::new(),
+        })
+    }
 
     /// List audit events.
     ///

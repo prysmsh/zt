@@ -258,7 +258,7 @@ export function EnrollmentResultView({
 }) {
   const [copied, setCopied] = useState<'credential' | 'command' | null>(null)
 
-  const command = `zt-node enroll --network ${networkName} --name ${result.node.name} --credential ${result.credential}`
+  const command = `zt-agent adopt --credential ${result.credential}`
 
   async function copy(what: 'credential' | 'command', value: string) {
     try {
