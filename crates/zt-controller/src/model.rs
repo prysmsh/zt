@@ -96,6 +96,26 @@ pub enum NodeStatus {
     Revoked,
 }
 
+/// What a tenant's nodes carried at one moment.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageSample {
+    pub id: EntityId,
+    /// The tenant the sample belongs to.
+    pub tenant_id: EntityId,
+    /// The node that reported it.
+    pub node_id: EntityId,
+    /// When it was reported.
+    pub recorded_at: u64,
+    /// How many nodes the tenant had at the time.
+    pub nodes: u32,
+    /// Bytes the node received.
+    pub bytes_in: u64,
+    /// Bytes the node sent.
+    pub bytes_out: u64,
+    /// Packets the node carried.
+    pub packets: u64,
+}
+
 /// The keys a node enrols with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeKeys {
@@ -318,6 +338,8 @@ pub struct ControllerState {
     pub nodes: BTreeMap<EntityId, Node>,
     pub policies: BTreeMap<EntityId, Policy>,
     pub relays: BTreeMap<EntityId, Relay>,
+    /// What the tenants' nodes carried, over time.
+    pub usage_samples: Vec<UsageSample>,
     pub events: Vec<AuditEvent>,
     pub started_at: u64,
 }
@@ -330,6 +352,7 @@ impl Default for ControllerState {
             nodes: BTreeMap::new(),
             policies: BTreeMap::new(),
             relays: BTreeMap::new(),
+            usage_samples: Vec::new(),
             events: Vec::new(),
             started_at: now_unix(),
         }

@@ -29,7 +29,8 @@ use crate::model::{
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
-    exceeded_limit, new_tenant, Deployment, Tenant, TenantLimits, TenantStatus, TenantUsage,
+    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantRates, TenantStatus,
+    TenantUsage, UsageSummary,
 };
 
 /// How long a node may go without a sighting before it counts as offline.
@@ -728,6 +729,79 @@ impl Controller {
         })
     }
 
+    /// What a tenant has used over the period that contains `now`.
+    ///
+    /// The period is a calendar month, so the numbers line up with an
+    /// invoice. The bytes are the samples' own counts; the node-hours are
+    /// the integral of the node count over the period, which is what a
+    /// per-node price is charged on: a tenant with one node for half the
+    /// month used half a node.
+    pub async fn usage_summary(&self, tenant_id: &str, now: u64) -> UsageSummary {
+        let (period_start, period_end) = month_bounds(now);
+
+        let state = self.inner.state.read().await;
+
+        let mut samples: Vec<&crate::model::UsageSample> = state
+            .usage_samples
+            .iter()
+            .filter(|sample| sample.tenant_id == tenant_id)
+            .filter(|sample| sample.recorded_at >= period_start && sample.recorded_at < period_end)
+            .collect();
+
+        samples.sort_by_key(|sample| sample.recorded_at);
+
+        let mut summary = UsageSummary {
+            period_start,
+            period_end,
+            samples: samples.len() as u64,
+            ..UsageSummary::default()
+        };
+
+        for sample in &samples {
+            summary.bytes_in += sample.bytes_in;
+            summary.bytes_out += sample.bytes_out;
+            summary.packets += sample.packets;
+        }
+
+        summary.node_seconds = integrate_node_seconds(&samples, period_start);
+
+        summary
+    }
+
+    /// What a tenant owes for the period that contains `now`.
+    pub async fn invoice(&self, tenant_id: &str, now: u64) -> Result<Invoice> {
+        let usage = self.usage_summary(tenant_id, now).await;
+
+        let state = self.inner.state.read().await;
+        let tenant = state
+            .tenants
+            .get(tenant_id)
+            .ok_or(ControllerError::NotFound("tenant"))?;
+        let rates = tenant.rates.clone();
+
+        // A node is charged for the fraction of the month it was there.
+        let period_seconds = usage.period_end.saturating_sub(usage.period_start).max(1);
+        let node_charges_cents =
+            (u128::from(rates.node_month_cents) * u128::from(usage.node_seconds)
+                / u128::from(period_seconds)) as u64;
+
+        // Traffic is charged by the gigabyte, rounded up.
+        const GIGABYTE: u64 = 1_000_000_000;
+        let gigabytes = usage.total_bytes().div_ceil(GIGABYTE);
+        let traffic_charges_cents = rates.gigabyte_cents.saturating_mul(gigabytes);
+
+        Ok(Invoice {
+            tenant_id: tenant_id.to_string(),
+            usage,
+            node_month_cents: rates.node_month_cents,
+            gigabyte_cents: rates.gigabyte_cents,
+            node_charges_cents,
+            traffic_charges_cents,
+            total_cents: node_charges_cents.saturating_add(traffic_charges_cents),
+            currency: rates.currency,
+        })
+    }
+
     /// Record how a node's peers reach it.
     ///
     /// The node reports it, because only the node knows it: it may be
@@ -740,24 +814,48 @@ impl Controller {
         node_id: &str,
         endpoint: &str,
         pq_public_key: &str,
+        usage: NodeUsage,
     ) -> Result<Node> {
         let mut state = self.inner.state.write().await;
 
-        let node = state
+        let node = {
+            let node = state
+                .nodes
+                .get_mut(node_id)
+                .filter(|node| node.tenant_id == tenant_id)
+                .ok_or(ControllerError::NotFound("node"))?;
+
+            node.endpoint = Some(endpoint.to_string());
+            node.last_seen = Some(now_unix());
+
+            // The node is talking to the controller, so it is online.
+            node.status = NodeStatus::Online;
+
+            if !pq_public_key.is_empty() {
+                node.pq_public_key = pq_public_key.to_string();
+            }
+
+            node.clone()
+        };
+
+        // What the node carried is what the tenant is charged for, so it
+        // is recorded with the sighting that reported it.
+        let nodes = state
             .nodes
-            .get_mut(node_id)
+            .values()
             .filter(|node| node.tenant_id == tenant_id)
-            .ok_or(ControllerError::NotFound("node"))?;
+            .count() as u32;
 
-        node.endpoint = Some(endpoint.to_string());
-        node.last_seen = Some(now_unix());
-
-        // The node is talking to the controller, so it is online.
-        node.status = NodeStatus::Online;
-
-        if !pq_public_key.is_empty() {
-            node.pq_public_key = pq_public_key.to_string();
-        }
+        state.usage_samples.push(crate::model::UsageSample {
+            id: uuid::Uuid::new_v4().to_string(),
+            tenant_id: tenant_id.to_string(),
+            node_id: node_id.to_string(),
+            recorded_at: now_unix(),
+            nodes,
+            bytes_in: usage.bytes_in,
+            bytes_out: usage.bytes_out,
+            packets: usage.packets,
+        });
 
         let node = node.clone();
         self.persist(&state).await?;
@@ -1247,6 +1345,153 @@ pub struct ControlPlaneHealth {
 }
 
 /// Stable, short fingerprint for a public key.
+/// What a node carried since it last reported.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NodeUsage {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub packets: u64,
+}
+
+/// The node-seconds a set of samples stands for.
+///
+/// The node count is a gauge, so it is integrated over time: the count at
+/// one sample holds until the next one. The count before the first sample
+/// held from the start of the period.
+fn integrate_node_seconds(samples: &[&crate::model::UsageSample], period_start: u64) -> u64 {
+    let mut total = 0;
+    let mut previous: Option<(u64, u32)> = None;
+
+    for sample in samples {
+        if let Some((at, nodes)) = previous {
+            let span = sample.recorded_at.saturating_sub(at);
+            total += u64::from(nodes) * span;
+        }
+
+        previous = Some((sample.recorded_at, sample.nodes));
+    }
+
+    // Before the first sample the count is not known, so the first
+    // sample's count is taken as the one that held.
+    if let Some(first) = samples.first() {
+        total += u64::from(first.nodes) * first.recorded_at.saturating_sub(period_start);
+    }
+
+    total
+}
+
+/// The bounds of the calendar month that contains `now`, in Unix seconds.
+///
+/// The month is the UTC one, so the period lines up with an invoice
+/// rather than with a deploy.
+fn month_bounds(now: u64) -> (u64, u64) {
+    let days = (now / 86_400) as i64;
+    let (year, month, _) = civil_from_days(days);
+
+    let start_of_month = days_from_civil(year, month, 1);
+    let next_month = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let start_of_next = days_from_civil(next_month.0, next_month.1, 1);
+
+    (
+        (start_of_month * 86_400) as u64,
+        (start_of_next * 86_400) as u64,
+    )
+}
+
+/// The year, month and day of a count of days since the epoch.
+///
+/// Howard Hinnant's civil calendar algorithm, which is exact for the
+/// proleptic Gregorian calendar.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
+/// The count of days since the epoch for a civil date.
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = i64::from(month);
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+
+    era * 146_097 + day_of_era - 719_468
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::UsageSample;
+
+    /// A sample with the given node count.
+    fn sample(at: u64, nodes: u32) -> UsageSample {
+        UsageSample {
+            id: format!("{at}-{nodes}"),
+            tenant_id: "t".into(),
+            node_id: "n".into(),
+            recorded_at: at,
+            nodes,
+            bytes_in: 0,
+            bytes_out: 0,
+            packets: 0,
+        }
+    }
+
+    #[test]
+    fn the_node_count_is_integrated_over_time() {
+        // Two nodes from the start of the period to the first sample, and
+        // two nodes for the hour between the samples.
+        let samples = vec![sample(1_000, 2), sample(4_600, 2)];
+        let refs: Vec<&UsageSample> = samples.iter().collect();
+
+        let seconds = integrate_node_seconds(&refs, 0);
+
+        assert_eq!(seconds, 2 * 1_000 + 2 * 3_600);
+    }
+
+    #[test]
+    fn a_later_count_holds_until_the_next_sample() {
+        // One node for the first second, then four for the next.
+        let samples = vec![sample(1_000, 1), sample(2_000, 4), sample(3_000, 4)];
+        let refs: Vec<&UsageSample> = samples.iter().collect();
+
+        assert_eq!(integrate_node_seconds(&refs, 1_000), 1_000 + 4_000);
+    }
+
+    #[test]
+    fn a_calendar_month_starts_on_the_first() {
+        // 2026-11-01T00:00:00Z.
+        let november = 1_793_491_200;
+        let (start, end) = month_bounds(november);
+        assert_eq!(start, november);
+        // November has 30 days.
+        assert_eq!(end - start, 30 * 86_400);
+
+        // A time in the middle of the month is in the same period.
+        let (middle_start, _) = month_bounds(november + 15 * 86_400);
+        assert_eq!(middle_start, november);
+
+        // And the next month is a different one.
+        let (december, _) = month_bounds(november + 30 * 86_400);
+        assert_eq!(december, 1_796_083_200);
+    }
+}
+
 fn fingerprint(public_key: &[u8; 32]) -> String {
     let digest = Sha256::digest(public_key);
     digest[..6]

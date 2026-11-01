@@ -113,15 +113,21 @@ What is not proven is a live session with a `tailscaled` peer: the control
 plane that `tailscaled` expects has not been stood up, so there is nothing
 to point it at. The protocol is the part that was open, and it is closed.
 
-### No metering
+### Billing is computed, not collected
 
-The controller counts resources per tenant and enforces quotas, but
-nothing records usage over time. There is no byte count, no connection
-count, no per-hour or per-day series, so a tenant's invoice cannot be
-computed from what the controller knows.
+The numbers a tenant is charged for now exist. The data plane counts the
+bytes and the packets it carries, the node agent reports them with its
+sightings, and the controller keeps the samples. From those it works out
+the node-hours — the integral of the node count over the period — and
+multiplies them by the tenant's rates. The master console shows what each
+tenant owes, and a tenant can ask for its own invoice.
 
-For a shared deployment this is the gap that matters most: the platform
-cannot bill.
+What is missing is **taking the money**. There is no payment provider
+wired in, no dunning, and no proration when a plan changes mid-period.
+The invoice is an estimate, not a debt.
+
+The period is a calendar month and the rates are on the tenant, so a
+price is written once and the invoice follows it.
 
 ### No retention job
 
@@ -175,9 +181,9 @@ controller, complete a handshake and carry a packet across the overlay.
    to be configured, and a node needs a way to reach a peer it has no
    route to. Without it the product does not carry traffic, and
    everything else is a console around a mesh.
-2. **Metering.** Needed before the first shared tenant is billed, and
-   cheap to add once the data plane exists, because that is where the
-   numbers come from.
+2. **Taking payment.** The invoice is computed; it is not collected.
+   A payment provider, the proration rules, and the dunning are what
+   stand between the numbers and an invoice that gets paid.
 3. **The retention job.** A small scheduled task. The soft delete is
    already correct; it just needs something to finish it.
 4. **Pagination.** Needed before a tenant's node list is large enough to

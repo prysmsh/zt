@@ -259,6 +259,7 @@ async fn the_runner_learns_its_own_address_and_its_peers() {
         .report_presence(
             "127.0.0.1:9995",
             &second.agent.state().pq_public_key_hex().unwrap(),
+            &zt_agent::NodeUsage::default(),
         )
         .expect("report");
 
@@ -289,7 +290,7 @@ async fn a_packet_crosses_the_overlay_between_two_runners() {
 
     // The two runners listen on loopback ports of their own.
     let first_queue = Queue::default();
-    let first_runner = runner(&first.agent, first_queue.clone());
+    let mut first_runner = runner(&first.agent, first_queue.clone());
 
     let second_queue = Queue::default();
     let mut second_runner = runner(&second.agent, second_queue.clone());

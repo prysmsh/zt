@@ -54,6 +54,8 @@ pub struct Tenant {
     pub plan: String,
     /// Resource limits for the tenant.
     pub limits: TenantLimits,
+    /// What the tenant is charged for.
+    pub rates: TenantRates,
     /// The controller identity for a shared tenant.
     ///
     /// `None` for a dedicated tenant, whose controller holds its own key.
@@ -144,6 +146,79 @@ pub struct TenantUsage {
     pub relays: u32,
 }
 
+/// What a tenant is charged for.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TenantRates {
+    /// The price of one node for a month, in cents.
+    pub node_month_cents: u64,
+    /// The price of one gigabyte relayed, in cents.
+    pub gigabyte_cents: u64,
+    /// The currency the prices are in.
+    pub currency: String,
+}
+
+impl Default for TenantRates {
+    fn default() -> Self {
+        Self {
+            node_month_cents: 1200,
+            gigabyte_cents: 2,
+            currency: "EUR".to_string(),
+        }
+    }
+}
+
+/// What a tenant has used over a period.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageSummary {
+    /// When the period started.
+    pub period_start: u64,
+    /// When the period ends.
+    pub period_end: u64,
+    /// Bytes received by the tenant's nodes.
+    pub bytes_in: u64,
+    /// Bytes sent by the tenant's nodes.
+    pub bytes_out: u64,
+    /// Packets carried in both directions.
+    pub packets: u64,
+    /// Node-seconds: the integral of the node count over the period.
+    pub node_seconds: u64,
+    /// The samples the summary was built from.
+    pub samples: u64,
+}
+
+impl UsageSummary {
+    /// The bytes carried in both directions.
+    pub fn total_bytes(&self) -> u64 {
+        self.bytes_in + self.bytes_out
+    }
+
+    /// The node-seconds as hours.
+    pub fn node_hours(&self) -> f64 {
+        self.node_seconds as f64 / 3600.0
+    }
+}
+
+/// What a tenant owes for a period.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Invoice {
+    /// The tenant the invoice is for.
+    pub tenant_id: String,
+    /// The usage the charges are computed from.
+    pub usage: UsageSummary,
+    /// The price of one node for a month, in cents.
+    pub node_month_cents: u64,
+    /// The price of one gigabyte relayed, in cents.
+    pub gigabyte_cents: u64,
+    /// The charge for the nodes, in cents.
+    pub node_charges_cents: u64,
+    /// The charge for the traffic, in cents.
+    pub traffic_charges_cents: u64,
+    /// The total, in cents.
+    pub total_cents: u64,
+    /// The currency the amounts are in.
+    pub currency: String,
+}
+
 /// Whether a usage snapshot exceeds any of a tenant's limits.
 ///
 /// Returns the name of the first exceeded limit, if any.
@@ -180,6 +255,7 @@ pub fn new_tenant(
         status: TenantStatus::Provisioning,
         plan,
         limits,
+        rates: TenantRates::default(),
         controller_id: None,
         controller_public_key: None,
         created_at: now,

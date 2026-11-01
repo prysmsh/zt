@@ -3,21 +3,29 @@ import {
   AlertTriangle, Building2, Check, ChevronRight, CircleSlash, Cloud,
   HardDrive, Pause, Play, Plus, RefreshCw, Server, ShieldAlert, Trash2, Users,
 } from 'lucide-react'
-import type { AdminApiClient, ControlPlaneHealth, Tenant, TenantUsage } from '../admin'
+import type { AdminApiClient, ControlPlaneHealth, Invoice, Tenant, TenantUsage } from '../admin'
 import { EmptyView, ErrorView, LoadingView } from './StateViews'
 
 export interface AdminState {
   health: ControlPlaneHealth | null
   tenants: Tenant[]
   usage: Record<string, TenantUsage>
+  invoices: Record<string, Invoice>
   loading: boolean
   error: string | null
+}
+
+/** An amount in cents, as money. */
+function formatMoney(cents: number, currency: string): string {
+  const symbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : `${currency} `
+  return `${symbol}${(cents / 100).toFixed(2)}`
 }
 
 export function useAdminData(api: AdminApiClient): AdminState & { refresh: () => void } {
   const [health, setHealth] = useState<ControlPlaneHealth | null>(null)
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [usage, setUsage] = useState<Record<string, TenantUsage>>({})
+  const [invoices, setInvoices] = useState<Record<string, Invoice>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,6 +56,23 @@ export function useAdminData(api: AdminApiClient): AdminState & { refresh: () =>
         if (value) nextUsage[id] = value
       }
       setUsage(nextUsage)
+
+      // What each tenant owes for the period. It is fetched alongside the
+      // usage, because it is the same question.
+      const billed = await Promise.all(
+        nextTenants.map(async (tenant) => {
+          try {
+            return [tenant.id, await api.tenantInvoice(tenant.id)] as const
+          } catch {
+            return [tenant.id, null] as const
+          }
+        }),
+      )
+      const nextInvoices: Record<string, Invoice> = {}
+      for (const [id, value] of billed) {
+        if (value) nextInvoices[id] = value
+      }
+      setInvoices(nextInvoices)
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to reach the control plane')
@@ -65,6 +90,7 @@ export function useAdminData(api: AdminApiClient): AdminState & { refresh: () =>
     health,
     tenants,
     usage,
+    invoices,
     loading,
     error,
     refresh: () => void load(),
@@ -261,6 +287,18 @@ export function MasterConsole({
                   <DeploymentBadge deployment={tenant.deployment} />
                   <TenantStatus status={tenant.status} />
                   <div className="tenant-plan">{tenant.plan}</div>
+                  <div className="tenant-estimate">
+                    {state.invoices[tenant.id] ? (
+                      <>
+                        <span className="estimate-amount">
+                          {formatMoney(state.invoices[tenant.id].total_cents, state.invoices[tenant.id].currency)}
+                        </span>
+                        <span className="estimate-note">this period</span>
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </div>
                   <div className="tenant-usage">
                     {tenantUsage ? (
                       <>

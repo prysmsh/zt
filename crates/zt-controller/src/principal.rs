@@ -27,6 +27,11 @@ impl Principal {
     pub fn subject(&self) -> &str {
         &self.0.subject
     }
+
+    /// The tenant the token belongs to, when it names one.
+    pub fn tenant_id(&self) -> Option<&str> {
+        self.0.tenant_id.as_deref()
+    }
 }
 
 impl<S> FromRequestParts<S> for Principal

@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 use crate::error::{ControllerError, Result};
-use crate::model::{AuditEvent, ControllerState, Network, Node, Policy, Relay};
+use crate::model::{AuditEvent, ControllerState, Network, Node, Policy, Relay, UsageSample};
 
 /// Trait implemented by controller storage backends.
 pub trait Store: Send + Sync + 'static {
@@ -94,6 +94,7 @@ impl SqliteStore {
                 status TEXT NOT NULL,
                 plan TEXT NOT NULL,
                 limits TEXT NOT NULL,
+                rates TEXT NOT NULL DEFAULT '{}',
                 controller_id TEXT,
                 controller_public_key TEXT,
                 created_at INTEGER NOT NULL,
@@ -179,6 +180,21 @@ impl SqliteStore {
                 timestamp INTEGER NOT NULL
             );
 
+            -- What a tenant's nodes carried, and when. The samples are the
+            -- raw material for an invoice: the byte counts are summed, and
+            -- the node count is integrated over time to give node-hours.
+            CREATE TABLE IF NOT EXISTS usage_samples (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                recorded_at INTEGER NOT NULL,
+                nodes INTEGER NOT NULL,
+                bytes_in INTEGER NOT NULL,
+                bytes_out INTEGER NOT NULL,
+                packets INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS usage_samples_tenant ON usage_samples(tenant_id, recorded_at);
             CREATE INDEX IF NOT EXISTS events_timestamp ON events(timestamp);
             CREATE INDEX IF NOT EXISTS networks_tenant ON networks(tenant_id);
             CREATE INDEX IF NOT EXISTS nodes_tenant ON nodes(tenant_id);
@@ -213,6 +229,15 @@ impl SqliteStore {
             }
         }
 
+        // The tenants table gained the rates when a tenant became something
+        // that could be charged for.
+        if !self.column_exists(&connection, "tenants", "rates") {
+            connection.execute(
+                "ALTER TABLE tenants ADD COLUMN rates TEXT NOT NULL DEFAULT '{}'",
+                [],
+            )?;
+        }
+
         let version: Option<i64> = connection
             .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
                 row.get(0)
@@ -240,7 +265,7 @@ impl SqliteStore {
 
     fn load_tenants(&self, connection: &Connection) -> Result<Vec<crate::tenant::Tenant>> {
         let mut statement = connection.prepare(
-            "SELECT id, name, slug, deployment, status, plan, limits, controller_id,
+            "SELECT id, name, slug, deployment, status, plan, limits, rates, controller_id,
                     controller_public_key, created_at, updated_at, suspended_at, deleted_at
              FROM tenants ORDER BY created_at, id",
         )?;
@@ -251,6 +276,9 @@ impl SqliteStore {
                 let limits_json: String = row.get(6)?;
                 let limits: crate::tenant::TenantLimits =
                     serde_json::from_str(&limits_json).unwrap_or_default();
+                let rates_json: String = row.get(7)?;
+                let rates: crate::tenant::TenantRates =
+                    serde_json::from_str(&rates_json).unwrap_or_default();
                 Ok(crate::tenant::Tenant {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -259,12 +287,35 @@ impl SqliteStore {
                     status: parse_tenant_status(&status),
                     plan: row.get(5)?,
                     limits,
-                    controller_id: row.get(7)?,
-                    controller_public_key: row.get(8)?,
-                    created_at: row.get::<_, i64>(9)? as u64,
-                    updated_at: row.get::<_, i64>(10)? as u64,
-                    suspended_at: row.get::<_, Option<i64>>(11)?.map(|v| v as u64),
-                    deleted_at: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+                    rates,
+                    controller_id: row.get(8)?,
+                    controller_public_key: row.get(9)?,
+                    created_at: row.get::<_, i64>(10)? as u64,
+                    updated_at: row.get::<_, i64>(11)? as u64,
+                    suspended_at: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+                    deleted_at: row.get::<_, Option<i64>>(13)?.map(|v| v as u64),
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn load_usage_samples(&self, connection: &Connection) -> Result<Vec<UsageSample>> {
+        let mut statement = connection.prepare(
+            "SELECT id, tenant_id, node_id, recorded_at, nodes, bytes_in, bytes_out, packets
+             FROM usage_samples ORDER BY recorded_at, id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(UsageSample {
+                    id: row.get(0)?,
+                    tenant_id: row.get(1)?,
+                    node_id: row.get(2)?,
+                    recorded_at: row.get::<_, i64>(3)? as u64,
+                    nodes: row.get::<_, i64>(4)? as u32,
+                    bytes_in: row.get::<_, i64>(5)? as u64,
+                    bytes_out: row.get::<_, i64>(6)? as u64,
+                    packets: row.get::<_, i64>(7)? as u64,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -435,6 +486,7 @@ impl Store for SqliteStore {
                 .into_iter()
                 .map(|node| (node.id.clone(), node))
                 .collect(),
+            usage_samples: self.load_usage_samples(&connection)?,
             policies: self
                 .load_policies(&connection)?
                 .into_iter()
@@ -458,15 +510,16 @@ impl Store for SqliteStore {
         transaction.execute("DELETE FROM relays", [])?;
         transaction.execute("DELETE FROM policies", [])?;
         transaction.execute("DELETE FROM nodes", [])?;
+        transaction.execute("DELETE FROM usage_samples", [])?;
         transaction.execute("DELETE FROM networks", [])?;
         transaction.execute("DELETE FROM tenants", [])?;
 
         for tenant in state.tenants.values() {
             transaction.execute(
-                "INSERT INTO tenants(id, name, slug, deployment, status, plan, limits,
+                "INSERT INTO tenants(id, name, slug, deployment, status, plan, limits, rates,
                                      controller_id, controller_public_key, created_at,
                                      updated_at, suspended_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     tenant.id,
                     tenant.name,
@@ -475,6 +528,7 @@ impl Store for SqliteStore {
                     format!("{:?}", tenant.status).to_lowercase(),
                     tenant.plan,
                     serde_json::to_string(&tenant.limits).unwrap_or_else(|_| "{}".into()),
+                    serde_json::to_string(&tenant.rates).unwrap_or_else(|_| "{}".into()),
                     tenant.controller_id,
                     tenant.controller_public_key,
                     tenant.created_at as i64,
@@ -530,6 +584,24 @@ impl Store for SqliteStore {
                     node.credential_not_after as i64,
                     node.last_seen.map(|value| value as i64),
                     node.created_at as i64,
+                ],
+            )?;
+        }
+
+        for sample in &state.usage_samples {
+            transaction.execute(
+                "INSERT INTO usage_samples(id, tenant_id, node_id, recorded_at, nodes,
+                                           bytes_in, bytes_out, packets)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    sample.id,
+                    sample.tenant_id,
+                    sample.node_id,
+                    sample.recorded_at as i64,
+                    sample.nodes as i64,
+                    sample.bytes_in as i64,
+                    sample.bytes_out as i64,
+                    sample.packets as i64,
                 ],
             )?;
         }

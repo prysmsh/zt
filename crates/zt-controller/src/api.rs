@@ -26,6 +26,8 @@ use serde_json::json;
 use crate::error::ControllerError;
 use crate::middleware::{require_auth, AuthState};
 use crate::model::{Network, Node, NodeKeys, Policy, Relay, Selector, Topology};
+use crate::tenant::Invoice;
+use crate::service::NodeUsage;
 use crate::principal::Principal;
 use crate::service::{ControlPlaneHealth, Controller};
 use crate::tenant::{Deployment, Tenant, TenantLimits};
@@ -61,6 +63,10 @@ fn build_router(controller: Controller) -> Router {
         .route("/api/v1/tenants/{id}/suspend", post(suspend_tenant))
         .route("/api/v1/tenants/{id}/reactivate", post(reactivate_tenant))
         .route("/api/v1/tenants/{id}/usage", get(tenant_usage))
+        // What a tenant owes for the period. The tenant sees its own, and
+        // the operator sees any tenant's.
+        .route("/api/v1/t/{tenant}/billing", get(tenant_billing))
+        .route("/api/v1/tenants/{id}/billing", get(tenant_billing_for))
         .route("/api/v1/tenants/{id}/events", get(tenant_events))
         .route("/api/v1/tenants/{id}", delete(delete_tenant))
         // Tenant-scoped API.
@@ -105,6 +111,14 @@ fn build_router(controller: Controller) -> Router {
         .route("/api/v1/t/{tenant}/relays/{id}/drain", post(drain_relay))
         .route("/api/v1/t/{tenant}/events", get(list_events))
         .with_state(controller)
+}
+
+/// The current Unix time in seconds.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Serialize)]
@@ -266,6 +280,33 @@ async fn delete_tenant(
 struct UsageResponse {
     usage: crate::tenant::TenantUsage,
     limits: TenantLimits,
+}
+
+/// What a tenant owes for the period that contains today.
+async fn tenant_billing(
+    State(controller): State<Controller>,
+    Path(tenant): Path<String>,
+    principal: Principal,
+) -> Result<Json<Invoice>, ControllerError> {
+    // The tenant may only see its own invoice. The operator may see any
+    // tenant's, which the tier above already allows.
+    if let Some(subject) = principal.tenant_id() {
+        if subject != tenant {
+            return Err(ControllerError::NotFound("tenant"));
+        }
+    }
+
+    let invoice = controller.invoice(&tenant, now_unix()).await?;
+    Ok(Json(invoice))
+}
+
+/// What a tenant owes, for the operator.
+async fn tenant_billing_for(
+    State(controller): State<Controller>,
+    Path(id): Path<String>,
+) -> Result<Json<Invoice>, ControllerError> {
+    let invoice = controller.invoice(&id, now_unix()).await?;
+    Ok(Json(invoice))
 }
 
 async fn tenant_usage(
@@ -481,6 +522,20 @@ struct PresenceRequest {
     /// the node starts, so a node reports it every time it comes up.
     #[serde(default)]
     pq_public_key: String,
+    /// What the node carried since it last reported.
+    #[serde(default)]
+    usage: UsageRequest,
+}
+
+/// What a node carried since it last reported.
+#[derive(Debug, Default, Deserialize)]
+struct UsageRequest {
+    #[serde(default)]
+    bytes_in: u64,
+    #[serde(default)]
+    bytes_out: u64,
+    #[serde(default)]
+    packets: u64,
 }
 
 async fn report_presence(
@@ -497,6 +552,11 @@ async fn report_presence(
             principal.subject(),
             &request.endpoint,
             &request.pq_public_key,
+            NodeUsage {
+                bytes_in: request.usage.bytes_in,
+                bytes_out: request.usage.bytes_out,
+                packets: request.usage.packets,
+            },
         )
         .await?;
     Ok(Json(node))

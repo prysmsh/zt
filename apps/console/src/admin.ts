@@ -31,6 +31,26 @@ export interface TenantUsage {
   relays: number
 }
 
+/** What a tenant owes for the period. */
+export interface Invoice {
+  tenant_id: string
+  usage: {
+    period_start: number
+    period_end: number
+    bytes_in: number
+    bytes_out: number
+    packets: number
+    node_seconds: number
+    samples: number
+  }
+  node_month_cents: number
+  gigabyte_cents: number
+  node_charges_cents: number
+  traffic_charges_cents: number
+  total_cents: number
+  currency: string
+}
+
 /** Health of the control plane as a whole. */
 export interface ControlPlaneHealth {
   status: string
@@ -73,6 +93,7 @@ export interface AdminApiClient {
   reactivateTenant(id: string): Promise<Tenant>
   deleteTenant(id: string): Promise<Tenant>
   tenantUsage(id: string): Promise<{ usage: TenantUsage; limits: Tenant['limits'] }>
+  tenantInvoice(id: string): Promise<Invoice>
   tenantEvents(id: string): Promise<AuditEvent[]>
   tenantNetworks(id: string): Promise<Network[]>
 }
@@ -178,6 +199,9 @@ export function createAdminClient(
       return request<{ usage: TenantUsage; limits: Tenant['limits'] }>(
         `/tenants/${encodeURIComponent(id)}/usage`,
       )
+    },
+    async tenantInvoice(id) {
+      return request<Invoice>(`/tenants/${encodeURIComponent(id)}/billing`)
     },
     async tenantEvents(id) {
       const result = await request<{ items: AuditEvent[] }>(

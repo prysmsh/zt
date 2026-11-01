@@ -135,7 +135,13 @@ async fn a_node_that_reports_its_presence_is_online() {
 
     fixture
         .controller
-        .report_presence(&fixture.tenant, &node.id, "198.51.100.7:9994", "")
+        .report_presence(
+            &fixture.tenant,
+            &node.id,
+            "198.51.100.7:9994",
+            "",
+            Default::default(),
+        )
         .await
         .expect("report");
 
@@ -149,7 +155,13 @@ async fn a_node_that_has_gone_quiet_is_offline() {
 
     fixture
         .controller
-        .report_presence(&fixture.tenant, &node.id, "198.51.100.7:9994", "")
+        .report_presence(
+            &fixture.tenant,
+            &node.id,
+            "198.51.100.7:9994",
+            "",
+            Default::default(),
+        )
         .await
         .expect("report");
 
@@ -170,7 +182,13 @@ async fn a_revoked_node_stays_revoked_however_recently_it_was_seen() {
 
     fixture
         .controller
-        .report_presence(&fixture.tenant, &node.id, "198.51.100.7:9994", "")
+        .report_presence(
+            &fixture.tenant,
+            &node.id,
+            "198.51.100.7:9994",
+            "",
+            Default::default(),
+        )
         .await
         .expect("report");
 
@@ -254,7 +272,13 @@ async fn the_api_reports_the_same_status() {
 
     fixture
         .controller
-        .report_presence(&fixture.tenant, &node.id, "198.51.100.7:9994", "")
+        .report_presence(
+            &fixture.tenant,
+            &node.id,
+            "198.51.100.7:9994",
+            "",
+            Default::default(),
+        )
         .await
         .expect("report");
 

@@ -30,6 +30,7 @@ pub use error::{AgentError, Result};
 pub mod runner;
 
 pub use runner::{Runner, RunnerConfig};
+pub use client::NodeUsage;
 pub use state::{default_state_path, NodeState};
 
 /// Configuration for an agent.

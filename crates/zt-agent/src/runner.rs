@@ -31,7 +31,7 @@ use zt_node::dataplane::DataPlane;
 use zt_node::Node;
 use zt_tun::PacketDevice;
 
-use crate::client::{ControllerClient, Topology, TopologyPeer};
+use crate::client::{ControllerClient, NodeUsage, Topology, TopologyPeer};
 use crate::error::{AgentError, Result};
 
 /// How the runner is set up.
@@ -201,10 +201,22 @@ impl Runner {
         Ok(())
     }
 
-    /// Report how the node's peers reach it.
-    pub fn report_presence(&self, pq_public_key: &str) -> Result<()> {
+    /// Report how the node's peers reach it, and what it carried.
+    ///
+    /// The count is taken, so the same bytes are never reported twice.
+    pub fn report_presence(&mut self, pq_public_key: &str) -> Result<()> {
         let endpoint = self.node.local_addr().to_string();
-        self.client.report_presence(&endpoint, pq_public_key)?;
+        let usage = self.plane.take_usage();
+
+        self.client.report_presence(
+            &endpoint,
+            pq_public_key,
+            &NodeUsage {
+                bytes_in: usage.bytes_in,
+                bytes_out: usage.bytes_out,
+                packets: usage.packets_in + usage.packets_out,
+            },
+        )?;
         Ok(())
     }
 
@@ -284,8 +296,10 @@ impl Runner {
 
                 // The controller shows a node as online while it keeps
                 // hearing from it, so the presence is reported on every
-                // refresh rather than only at startup.
-                let _ = self.report_presence(&self.pq_public_key);
+                // refresh rather than only at startup. The same report
+                // carries what the node carried, which is what the
+                // tenant is charged for.
+                let _ = self.report_presence(&self.pq_public_key.clone());
             }
 
             let _ = self.connect_peers();

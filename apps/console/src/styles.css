@@ -612,7 +612,7 @@ tbody tr:hover { background: var(--panel-hover); }
 .tenant-list { display: grid; }
 .tenant-row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.3fr) auto auto 90px minmax(220px, 1.1fr) auto;
+  grid-template-columns: minmax(190px, 1.3fr) auto auto 90px minmax(200px, 1fr) auto auto;
   align-items: center;
   gap: 16px;
   min-height: 74px;
@@ -649,6 +649,9 @@ tbody tr:hover { background: var(--panel-hover); }
 
 .tenant-plan { font-size: 12px; color: var(--muted); text-transform: capitalize; }
 .tenant-usage { display: grid; gap: 7px; }
+.tenant-estimate { display: grid; gap: 3px; justify-items: start; }
+.estimate-amount { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.estimate-note { font-size: 10px; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.08em; }
 .tenant-actions { display: flex; align-items: center; gap: 6px; }
 
 .usage-bar { display: grid; gap: 3px; }

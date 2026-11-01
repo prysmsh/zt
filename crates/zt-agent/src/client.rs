@@ -100,6 +100,14 @@ struct NetworkList {
     items: Vec<NetworkInfo>,
 }
 
+/// What a node carried since it last reported.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NodeUsage {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub packets: u64,
+}
+
 /// A peer in the topology the controller hands a node.
 #[derive(Clone, Debug, Deserialize)]
 pub struct TopologyPeer {
@@ -259,15 +267,25 @@ impl ControllerClient {
         self.get(&self.tenant_url("topology"))
     }
 
-    /// Report how this node's peers reach it.
+    /// Report how this node's peers reach it, and what it carried.
     ///
     /// The endpoint is where the node listens. The post-quantum key is the
     /// one the node signs its handshakes with, which a peer needs to check
-    /// them.
-    pub fn report_presence(&self, endpoint: &str, pq_public_key: &str) -> Result<ControllerNode> {
+    /// them. The usage is what the tenant is charged for.
+    pub fn report_presence(
+        &self,
+        endpoint: &str,
+        pq_public_key: &str,
+        usage: &NodeUsage,
+    ) -> Result<ControllerNode> {
         let body = serde_json::json!({
             "endpoint": endpoint,
             "pq_public_key": pq_public_key,
+            "usage": {
+                "bytes_in": usage.bytes_in,
+                "bytes_out": usage.bytes_out,
+                "packets": usage.packets,
+            },
         });
         self.post(&self.tenant_url("nodes/self/presence"), &body)
     }

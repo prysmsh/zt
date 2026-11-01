@@ -368,7 +368,11 @@ fn checkin(options: Options, config: AgentConfig) -> Result<String> {
     let client = agent.client().clone();
 
     let report = |client: &ControllerClient| -> Result<usize> {
-        client.report_presence(&endpoint.to_string(), &pq_public_key)?;
+        client.report_presence(
+            &endpoint.to_string(),
+            &pq_public_key,
+            &zt_agent::NodeUsage::default(),
+        )?;
         Ok(0)
     };
 

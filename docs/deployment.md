@@ -462,6 +462,25 @@ to take effect:
 docker compose restart logto
 ```
 
+## Metering and billing
+
+A tenant is charged for the nodes it ran and the traffic it carried.
+
+The node agent's data plane counts the bytes and packets it carries, and
+reports them with its sighting. The controller keeps the samples, works
+out the node-hours over the calendar month, and multiplies them by the
+tenant's rates. The rates are on the tenant:
+
+```json
+{ "node_month_cents": 1200, "gigabyte_cents": 2, "currency": "EUR" }
+```
+
+The invoice is at `/api/v1/t/{tenant}/billing` for the tenant, and
+`/api/v1/tenants/{id}/billing` for the operator. The master console shows
+the estimate beside each tenant.
+
+Nothing takes the money yet: the invoice is an estimate, not a debt.
+
 ## The node agent
 
 A node is shown as online while it keeps talking to the controller, and as

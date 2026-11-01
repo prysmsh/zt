@@ -256,11 +256,33 @@ impl RouteTable {
     }
 }
 
+/// What a node has carried since the last count was taken.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Bytes received from the peers.
+    pub bytes_in: u64,
+    /// Bytes sent to the peers.
+    pub bytes_out: u64,
+    /// Packets received from the peers.
+    pub packets_in: u64,
+    /// Packets sent to the peers.
+    pub packets_out: u64,
+}
+
+impl Usage {
+    /// The bytes carried in both directions.
+    pub fn total_bytes(&self) -> u64 {
+        self.bytes_in + self.bytes_out
+    }
+}
+
 /// The data plane of a node.
 pub struct DataPlane {
     device: Box<dyn PacketDevice>,
     routes: RouteTable,
     local: HashMap<Ipv4Addr, ()>,
+    /// What the node has carried since the last count was taken.
+    usage: Usage,
 }
 
 impl DataPlane {
@@ -270,6 +292,7 @@ impl DataPlane {
             device,
             routes: RouteTable::new(),
             local: HashMap::new(),
+            usage: Usage::default(),
         }
     }
 
@@ -281,6 +304,19 @@ impl DataPlane {
     /// The routes.
     pub fn routes(&self) -> &RouteTable {
         &self.routes
+    }
+
+    /// What the node has carried since the last count was taken.
+    pub fn usage(&self) -> Usage {
+        self.usage
+    }
+
+    /// Take the count, and start again from zero.
+    ///
+    /// A node reports what it carried and then hands the count over, so
+    /// the same bytes are never counted twice.
+    pub fn take_usage(&mut self) -> Usage {
+        std::mem::take(&mut self.usage)
     }
 
     /// Take part in a network.
@@ -361,6 +397,8 @@ impl DataPlane {
                 continue;
             }
 
+            self.usage.bytes_out += count as u64;
+            self.usage.packets_out += 1;
             forwarded += 1;
         }
 
@@ -402,6 +440,8 @@ impl DataPlane {
                 continue;
             }
 
+            self.usage.bytes_in += frame.payload.len() as u64;
+            self.usage.packets_in += 1;
             written += 1;
         }
 
