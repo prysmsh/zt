@@ -67,6 +67,51 @@ Renewed credential for web-01
 | `--state <PATH>` | State file path. Default `zt-node.json` |
 | `--force` | Renew even when the credential is not yet due |
 
+## How a node authenticates
+
+A node holds no secret. It authenticates with the **credential the
+controller issued it**, presented as a bearer token.
+
+The credential is signed by the controller and bound to the node's own
+Ed25519 key. The controller verifies the signature with its own public
+key, checks the credential has not expired, and checks the binding. A
+credential replayed from another node fails the binding check, so it is
+useless.
+
+A node's credential reaches **its own tenant** and nothing else. It cannot
+reach the master console, and it cannot reach another tenant.
+
+### Joining a controller that requires authentication
+
+A node cannot enrol itself against an authenticated controller: it has no
+credential yet, so it has nothing to authenticate with. The flow is:
+
+1. The operator enrols the node from the console, which issues the
+   credential and shows it once.
+2. The node adopts it:
+
+```console
+$ zt-agent adopt --controller https://zt.example.dev --tenant acme \
+    --credential 01df775733c32d178bdd8…
+Adopted the credential for web-01
+  node id:   0d32c965-7de5-4f30-ac67-4ce0776e1683
+  network:   3f9506c4-7710-483d-bcfc-9a6b9630818d
+  address:   94e4bef4fcc70214ffa3
+  expires:   2026-11-02 07:25:03
+```
+
+3. The node asks the controller who it is, which is how it learns its own
+   identifier for renewal. The credential authenticates that call.
+
+`zt-agent enroll` remains for controllers that permit a node to enrol
+itself, such as a first-run controller on a private network.
+
+## The HTTP client
+
+The client is [ureq](https://docs.rs/ureq), with rustls for TLS. The
+controller is normally reached over HTTPS through a reverse proxy, so the
+client speaks TLS and follows redirects.
+
 ## The trust anchor
 
 On first run the agent fetches the controller's public key from
