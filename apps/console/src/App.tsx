@@ -132,7 +132,7 @@ function StatusPill({ status }: { status: Status }) {
     online: 'Online',
     degraded: 'Degraded',
     offline: 'Offline',
-    pending: 'Pending',
+    pending: 'Not yet connected',
     revoked: 'Revoked',
   }
   return <span className={`status ${status}`}>{labels[status]}</span>

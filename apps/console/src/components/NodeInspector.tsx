@@ -54,6 +54,12 @@ export function NodeInspector({
         </button>
       </div>
 
+      {node.status === 'pending' ? (
+        <p className="inspector-pending">
+          This node holds a credential but has never contacted the
+          controller. It will show as online as soon as it does.
+        </p>
+      ) : null}
       <dl className="inspector-grid">
         <Detail label="Address" value={node.address} mono />
         <Detail label="Network" value={networkName} />

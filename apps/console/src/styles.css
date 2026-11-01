@@ -511,6 +511,26 @@ tbody tr:hover { background: var(--panel-hover); }
 .inspector-title { display: grid; gap: 3px; }
 .inspector-title strong { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .inspector-sub { color: var(--muted-2); font-size: 11px; }
+.inspector-pending {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.inspector-pending {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.4);
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .inspector-grid { display: grid; gap: 0; margin: 0; }
 .inspector-row {
   display: grid;
