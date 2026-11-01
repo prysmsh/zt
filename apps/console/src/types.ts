@@ -1,0 +1,70 @@
+export type NodeStatus = 'online' | 'degraded' | 'offline' | 'pending' | 'revoked'
+export type NetworkStatus = 'healthy' | 'degraded' | 'attention'
+export type RelayStatus = 'healthy' | 'degraded' | 'offline' | 'draining'
+export type EventKind = 'node' | 'policy' | 'credential' | 'relay' | 'system'
+export type EventLevel = 'info' | 'success' | 'warning' | 'error'
+
+export interface Network {
+  id: string
+  name: string
+  description: string
+  cidr: string
+  nodeCount: number
+  onlineCount: number
+  relayCount: number
+  status: NetworkStatus
+  accent: 'cyan' | 'violet' | 'amber' | 'blue'
+}
+
+export interface MeshNode {
+  id: string
+  name: string
+  address: string
+  network: string
+  status: NodeStatus
+  role: string
+  platform: string
+  version: string
+  lastSeen: string
+  directPeers: number
+  relayedPeers: number
+  credentialExpires: string
+  tags: string[]
+  fingerprint: string
+  endpoint?: string
+}
+
+export interface Relay {
+  id: string
+  name: string
+  address: string
+  endpoint: string
+  networks: number
+  sessions: number
+  availability: number
+  bandwidth: string
+  status: RelayStatus
+  enabled: boolean
+}
+
+export interface Policy {
+  id: string
+  name: string
+  description: string
+  protocol: string
+  port: string
+  source: string
+  destination: string
+  enabled: boolean
+  updated: string
+}
+
+export interface AuditEvent {
+  id: string
+  kind: EventKind
+  level: EventLevel
+  title: string
+  detail: string
+  actor: string
+  time: string
+}

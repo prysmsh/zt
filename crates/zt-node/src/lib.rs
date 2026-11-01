@@ -26,11 +26,14 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+pub mod dialect;
+
 use zt_crypto::error::Error;
 use zt_crypto::handshake_flow::{
     Initiator, PeerStatic, Responder, StaticIdentity, MAX_HANDSHAKE_MESSAGE,
 };
 use zt_crypto::identity::Identity;
+use zt_crypto::membership::{ControllerTrust, Membership};
 use zt_crypto::packet::Packet;
 use zt_crypto::pq::{KemSuite, SigSuite};
 use zt_crypto::session::Session;
@@ -116,6 +119,12 @@ pub struct Node {
     peers: HashMap<SocketAddr, Peer>,
     kem_suite: KemSuite,
     sig_suite: SigSuite,
+    /// The credentials this node presents to its peers.
+    membership: Membership,
+    /// The controllers this node accepts credentials from.
+    trust: ControllerTrust,
+    /// Whether peers must present valid credentials to connect.
+    require_membership: bool,
 }
 
 impl Node {
@@ -139,7 +148,35 @@ impl Node {
             peers: HashMap::new(),
             kem_suite: KemSuite::HybridX25519MlKem768,
             sig_suite: SigSuite::HybridEd25519MlDsa65,
+            membership: Membership::new(),
+            trust: ControllerTrust::new(),
+            require_membership: false,
         })
+    }
+
+    /// Present the given membership credentials to peers.
+    ///
+    /// These are the credentials a controller issued for this node. They are
+    /// included in every handshake this node initiates, and bound into the
+    /// handshake transcript.
+    pub fn set_membership(&mut self, membership: Membership) {
+        self.membership = membership;
+    }
+
+    /// Trust the given controllers.
+    ///
+    /// A peer whose credentials were not signed by one of these controllers
+    /// is refused.
+    pub fn set_trust(&mut self, trust: ControllerTrust) {
+        self.trust = trust;
+    }
+
+    /// Require peers to present valid credentials.
+    ///
+    /// This is what a node belonging to a network should use: an
+    /// unauthenticated peer must not be able to join.
+    pub fn require_membership(&mut self, required: bool) {
+        self.require_membership = required;
     }
 
     /// Access the underlying socket, for tests and for integrating with an
@@ -217,6 +254,12 @@ impl Node {
             self.kem_suite,
             self.sig_suite,
         )?;
+
+        // The credentials are presented to the peer, and bound into the
+        // handshake transcript.
+        if !self.membership.is_empty() {
+            initiator.set_membership(self.membership.clone());
+        }
 
         let first_message = initiator.write_message_1()?;
 
@@ -303,18 +346,31 @@ impl Node {
             return Ok(Vec::new());
         }
 
-        // Distinguish handshake messages from data packets. Handshake
-        // messages begin with their type byte (0x01 or 0x02); data packets
-        // begin with a 4-byte session id whose first byte is never 0x01 or
-        // 0x02 in practice. To be unambiguous, the first byte of a data
-        // packet is masked to zero, so a leading 0x01/0x02 always means a
-        // handshake message.
-        match bytes[0] {
-            0x01 | 0x02 => {
-                self.handle_handshake(bytes, from)?;
-                Ok(Vec::new())
+        // Datagrams are classified by their header prefix. The native
+        // handshake and data formats are told apart by their leading bytes:
+        // data packets carry the magic prefix (whose first byte is zero),
+        // handshake messages carry a type byte of 0x01 or 0x02. The two are
+        // unambiguous, and neither collides with the foreign dialects.
+        match dialect::classify(bytes) {
+            dialect::Dialect::ZtNext => {
+                if zt_crypto::packet::is_handshake_packet(bytes) {
+                    self.handle_handshake(bytes, from)?;
+                    Ok(Vec::new())
+                } else {
+                    self.handle_data(bytes, from)
+                }
             }
-            _ => self.handle_data(bytes, from),
+            dialect::Dialect::Tailscale | dialect::Dialect::ZeroTier => {
+                // Foreign dialects are dispatched to their own session
+                // managers. Until those managers are wired in, the
+                // datagram is dropped rather than misparsed.
+                Err(NodeError::Crypto(Error::InvalidKey(
+                    "foreign dialect session manager not yet installed",
+                )))
+            }
+            dialect::Dialect::Unknown => Err(NodeError::Crypto(Error::InvalidKey(
+                "unrecognised datagram format",
+            ))),
         }
     }
 
@@ -339,23 +395,18 @@ impl Node {
             self.kem_suite,
             self.sig_suite,
         )?;
+
+        // The peer's credentials are verified before the session is
+        // established, so an unauthenticated peer never gets traffic keys.
+        responder.set_trust(self.trust.clone());
+        responder.require_membership(self.require_membership);
+
         responder.read_message_1(bytes)?;
         let response = responder.write_message_2()?;
 
         // The responder's traffic keys are the mirror of the initiator's.
         let (send_key, recv_key) = responder.split_traffic_keys()?;
-
-        // The session identifier must be identical on both sides. The
-        // transcript hash is the one value both parties agree on, so it is
-        // used as the session nonce.
-        let transcript = responder.transcript_hash();
-        let mut nonce = [0u8; 8];
-        nonce.copy_from_slice(&transcript[..8]);
-
-        // The initiator is the peer whose datagram we received; the
-        // responder is us.
-        let session_id = derive_session_id(from, &self.identity.public_key(), &nonce);
-        let session = Session::new(session_id, send_key, recv_key);
+        let session = Session::new(send_key, recv_key);
 
         self.socket.send_to(&response, from)?;
 
@@ -398,14 +449,7 @@ impl Node {
 
         let result = initiator.read_message_2(bytes)?;
 
-        // Both sides derive the session identifier from the transcript hash,
-        // which they both know, plus the responder's public key and the
-        // initiator's address.
-        let mut nonce = [0u8; 8];
-        nonce.copy_from_slice(&result.transcript_hash[..8]);
-        let session_id = derive_session_id(self.local, &peer_key.ed25519, &nonce);
-
-        let session = Session::new(session_id, result.send_key, result.recv_key);
+        let session = Session::new(result.send_key, result.recv_key);
         entry.state = PeerState::Connected(Box::new(session));
         Ok(())
     }

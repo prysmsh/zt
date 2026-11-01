@@ -1,0 +1,71 @@
+# The ZT-next control plane.
+#
+# The controller is the API and the source of truth. It is not published to
+# the host directly: Caddy terminates TLS and proxies to it over the compose
+# network, so the controller never sees a public socket.
+#
+# Authentication is mandatory here. The controller refuses to start without an
+# OIDC provider unless it is bound to loopback, so a misconfiguration cannot
+# expose the master console.
+
+services:
+  controller:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        BINARY: zt-controller
+    restart: unless-stopped
+    environment:
+      ZT_CONTROLLER_LISTEN: 0.0.0.0:8080
+      ZT_CONTROLLER_DATA_DIR: /var/lib/zt-next
+      # The OIDC provider. The JWKS endpoint is discovered from the issuer
+      # when ZT_OIDC_JWKS is not set.
+      ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://auth.prysm.sh/oidc}
+      ZT_OIDC_AUDIENCE: ${ZT_OIDC_AUDIENCE:-zt-console-app-001}
+      ZT_OIDC_OPERATOR_ROLE: ${ZT_OIDC_OPERATOR_ROLE:-zt:operator}
+      ZT_OIDC_TENANT_SCOPE: ${ZT_OIDC_TENANT_SCOPE:-zt:tenant}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - controller-data:/var/lib/zt-next
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/v1/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # The console. It is a static bundle served by Caddy, which also proxies
+  # the API under /api so the browser sees a single origin.
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      controller:
+        condition: service_healthy
+      console:
+        condition: service_started
+    environment:
+      ZT_PUBLIC_HOST: ${ZT_PUBLIC_HOST:?ZT_PUBLIC_HOST is required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+
+volumes:
+  controller-data:
+  caddy-data:
+  caddy-config:

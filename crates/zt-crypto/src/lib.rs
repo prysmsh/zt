@@ -48,12 +48,14 @@ pub mod error;
 pub mod handshake;
 pub mod handshake_flow;
 pub mod identity;
+pub mod membership;
 pub mod key_agreement;
 pub mod noise;
 pub mod packet;
 pub mod pq;
 pub mod session;
 pub mod symmetric;
+pub mod time;
 
 pub use credential::{ControllerIdentity, NodeCredential};
 pub use error::{Error, Result};

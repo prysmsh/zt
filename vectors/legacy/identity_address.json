@@ -12,7 +12,7 @@
         {"name": "network_id", "value": "7766554433221100"}
       ],
       "outputs": [
-        {"name": "address", "value": "3ffb6523c4"}
+        {"name": "address", "value": "a7182a2a0a"}
       ]
     },
     {
@@ -24,7 +24,7 @@
         {"name": "network_id", "value": "0000000000000000"}
       ],
       "outputs": [
-        {"name": "address", "value": "6ac32d4907"}
+        {"name": "address", "value": "04c3c6662c"}
       ]
     },
     {
@@ -36,7 +36,7 @@
         {"name": "network_id", "value": "ffffffffffffffff"}
       ],
       "outputs": [
-        {"name": "address", "value": "d029053f78"}
+        {"name": "address", "value": "ed640b93a8"}
       ]
     }
   ]

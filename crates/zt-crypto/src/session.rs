@@ -6,16 +6,11 @@
 
 use crate::error::{Error, Result};
 use crate::noise::TransportCipher;
-use crate::packet::{Packet, ReceiveWindow, HEADER_LEN, MAX_PAYLOAD};
+use crate::packet::{Packet, ReceiveWindow, HEADER_LEN, MAX_PAYLOAD, PACKET_MAGIC};
 use crate::symmetric::SymmetricKey;
-
-/// Length of the session identifier.
-pub const SESSION_ID_LEN: usize = 4;
 
 /// An established, encrypted session between two peers.
 pub struct Session {
-    /// The session identifier, unique per handshake.
-    pub session_id: [u8; SESSION_ID_LEN],
     /// Cipher for packets we send.
     send: TransportCipher,
     /// Cipher for packets we receive.
@@ -28,17 +23,8 @@ pub struct Session {
 
 impl Session {
     /// Create a session from the handshake's derived keys.
-    ///
-    /// `session_id` must be unique for this peer pair; reusing one across
-    /// sessions would allow ciphertexts from an old session to be replayed
-    /// into a new one.
-    pub fn new(
-        session_id: [u8; SESSION_ID_LEN],
-        send_key: SymmetricKey,
-        recv_key: SymmetricKey,
-    ) -> Session {
+    pub fn new(send_key: SymmetricKey, recv_key: SymmetricKey) -> Session {
         Session {
-            session_id,
             send: TransportCipher::new(send_key),
             recv: TransportCipher::new(recv_key),
             send_seq: 0,
@@ -55,7 +41,7 @@ impl Session {
         let ciphertext = self.send.seal(&inner)?;
 
         let mut out = Vec::with_capacity(HEADER_LEN + ciphertext.len());
-        out.extend_from_slice(&self.session_id);
+        out.extend_from_slice(&PACKET_MAGIC);
         out.extend_from_slice(&self.send_seq.to_be_bytes());
         out.push(0); // reserved: the inner type is encrypted
         out.extend_from_slice(&(ciphertext.len() as u16).to_be_bytes());
@@ -75,14 +61,11 @@ impl Session {
         if bytes.len() > HEADER_LEN + MAX_PAYLOAD + 16 {
             return Err(Error::InvalidLength);
         }
-
-        let mut session_id = [0u8; SESSION_ID_LEN];
-        session_id.copy_from_slice(&bytes[..SESSION_ID_LEN]);
-        if session_id != self.session_id {
-            return Err(Error::InvalidKey("wrong session"));
+        if bytes[..PACKET_MAGIC.len()] != PACKET_MAGIC {
+            return Err(Error::InvalidKey("not a ZT-next data packet"));
         }
 
-        let seq_start = SESSION_ID_LEN;
+        let seq_start = PACKET_MAGIC.len();
         let mut seq_bytes = [0u8; 8];
         seq_bytes.copy_from_slice(&bytes[seq_start..seq_start + 8]);
         let seq = u64::from_be_bytes(seq_bytes);
@@ -121,7 +104,6 @@ impl Session {
 impl core::fmt::Debug for Session {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Session")
-            .field("session_id", &hex::encode(self.session_id))
             .field("send_seq", &self.send_seq)
             .finish()
     }
@@ -135,10 +117,9 @@ mod tests {
     fn pair() -> (Session, Session) {
         let key_a = SymmetricKey::generate().unwrap();
         let key_b = SymmetricKey::generate().unwrap();
-        let id = [1u8, 2, 3, 4];
         (
-            Session::new(id, key_a.clone(), key_b.clone()),
-            Session::new(id, key_b, key_a),
+            Session::new(key_a.clone(), key_b.clone()),
+            Session::new(key_b, key_a),
         )
     }
 
@@ -149,6 +130,34 @@ mod tests {
         let bytes = a.seal(&p).unwrap();
         let out = b.open(&bytes).unwrap().unwrap();
         assert_eq!(out, p);
+    }
+
+    #[test]
+    fn data_packets_have_the_magic_prefix() {
+        let (mut a, _) = pair();
+        let bytes = a.seal(&Packet::new(TYPE_FRAME, vec![1])).unwrap();
+        assert_eq!(&bytes[..4], &PACKET_MAGIC[..]);
+        assert!(crate::packet::is_data_packet(&bytes));
+        assert!(!crate::packet::is_handshake_packet(&bytes));
+    }
+
+    #[test]
+    fn handshake_messages_are_distinguishable() {
+        // A handshake message starts with the native magic prefix.
+        assert!(crate::packet::is_handshake_packet(&[
+            0x00, 0x5a, 0x54, 0x01, 0x00
+        ]));
+        assert!(crate::packet::is_handshake_packet(&[
+            0x00, 0x5a, 0x54, 0x02, 0x00
+        ]));
+        assert!(!crate::packet::is_data_packet(&[0x00, 0x5a, 0x54, 0x01]));
+        // A datagram without the magic is neither a handshake nor data.
+        assert!(!crate::packet::is_handshake_packet(&[0x01, 0x00]));
+        assert!(!crate::packet::is_data_packet(&[0x01, 0x00]));
+        // A data packet is never mistaken for a handshake message.
+        let (mut a, _) = pair();
+        let bytes = a.seal(&Packet::new(TYPE_FRAME, vec![1])).unwrap();
+        assert!(!crate::packet::is_handshake_packet(&bytes));
     }
 
     #[test]
@@ -172,16 +181,6 @@ mod tests {
     }
 
     #[test]
-    fn wrong_session_is_rejected() {
-        let key_a = SymmetricKey::generate().unwrap();
-        let key_b = SymmetricKey::generate().unwrap();
-        let mut a = Session::new([1, 1, 1, 1], key_a.clone(), key_b.clone());
-        let mut b = Session::new([2, 2, 2, 2], key_b, key_a);
-        let bytes = a.seal(&Packet::new(TYPE_FRAME, vec![1])).unwrap();
-        assert!(b.open(&bytes).is_err());
-    }
-
-    #[test]
     fn tampered_packet_fails_authentication() {
         let (mut a, mut b) = pair();
         let mut bytes = a.seal(&Packet::new(TYPE_FRAME, b"data".to_vec())).unwrap();
@@ -195,6 +194,14 @@ mod tests {
         let (mut a, mut b) = pair();
         let bytes = a.seal(&Packet::new(TYPE_FRAME, b"data".to_vec())).unwrap();
         assert!(b.open(&bytes[..5]).is_err());
+    }
+
+    #[test]
+    fn non_magic_prefix_is_rejected() {
+        let (mut a, mut b) = pair();
+        let mut bytes = a.seal(&Packet::new(TYPE_FRAME, b"data".to_vec())).unwrap();
+        bytes[0] = 0xff;
+        assert!(b.open(&bytes).is_err());
     }
 
     #[test]

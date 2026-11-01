@@ -9,11 +9,11 @@
       "op": "identity.sign",
       "description": "Ed25519 signature over a fixed message",
       "inputs": [
-        {"name": "public_key", "value": "ba3ccfd50f88833e028648489391050a1edd7bce0dad1e58e7bc93167f8ea514084152e6a3efb0868d8d8bfb5872034c9730bf70d0178acada33710e6b57664f"},
+        {"name": "public_key", "value": "bdedff1cb9e0f45dedd9f9b00e2acaa7e1c848048cce762686712772500247274f5e7f1b74b0503367eef0f9fb51b709e309cf6714ce486d30a29bf8c709b4db"},
         {"name": "message", "value": "7a742d6e657874207465737420766563746f72206d657373616765"}
       ],
       "outputs": [
-        {"name": "signature", "value": "d2dc1393b7b0c99a13cc872ac2e3300adc3ad511ff3b5a64801a18fc8c8b7eebfdd0e2d29cadf48f6a694d03e39e46670ef1eb5f220ccc7edf0f1f0c91bf260a167082161ae92c7f3e5404af0a2fe201ad1c186981ed2f8594b79904d12dbde3"}
+        {"name": "signature", "value": "df6458e3c168023bc5fcba3b6327b4ab145750cd732782507f5aa1bc2d3cca04d54b4de0897a6ea359757c9295606ffc03a6a2f8b1b679417944527853a4ec04167082161ae92c7f3e5404af0a2fe201ad1c186981ed2f8594b79904d12dbde3"}
       ]
     }
   ]

@@ -41,7 +41,7 @@
 ///
 /// ```text
 /// ┌──────────────┬──────────────┬──────────────┬──────────────┐
-/// │ session_id   │ seq          │ reserved     │ payload_len  │
+/// │ magic        │ seq          │ reserved     │ payload_len  │
 /// │ [u8;4]       │ u64          │ u8           │ u16          │
 /// ├──────────────┴──────────────┴──────────────┴──────────────┤
 /// │ ciphertext + Poly1305 tag                                  │
@@ -50,6 +50,13 @@
 ///
 /// 4 + 8 + 1 + 2 = 15 bytes of header.
 pub const HEADER_LEN: usize = 15;
+
+/// Magic bytes that mark a datagram as a ZT-next data packet.
+///
+/// The first byte is zero, which cannot be confused with a handshake
+/// message type (0x01 or 0x02). This is what allows a node to tell the two
+/// apart by inspection, without a context or port convention.
+pub const PACKET_MAGIC: [u8; 4] = [0x00, 0x5a, 0x54, 0x00];
 
 /// Largest payload that fits in a single UDP datagram without IP
 /// fragmentation.
@@ -215,6 +222,25 @@ impl core::fmt::Debug for ReceiveWindow {
             .field("started", &self.started)
             .finish()
     }
+}
+
+/// Whether a datagram is a ZT-next data packet.
+///
+/// Data packets begin with [`PACKET_MAGIC`]. Handshake messages begin with
+/// [`crate::handshake_flow::HANDSHAKE_MAGIC`]. The two are unambiguously
+/// distinguishable, and neither can be confused with a foreign dialect.
+pub fn is_data_packet(bytes: &[u8]) -> bool {
+    bytes.len() >= PACKET_MAGIC.len() && bytes[..PACKET_MAGIC.len()] == PACKET_MAGIC
+}
+
+/// Whether a datagram looks like a ZT-next handshake message.
+///
+/// The handshake and data magics share a three-byte prefix and differ in
+/// the fourth byte: `0x00` for data, `0x01` or `0x02` for a handshake
+/// initiation or response. The fourth byte is therefore the discriminator.
+pub fn is_handshake_packet(bytes: &[u8]) -> bool {
+    const HANDSHAKE_PREFIX: [u8; 3] = [0x00, 0x5a, 0x54];
+    bytes.len() >= 4 && bytes[..3] == HANDSHAKE_PREFIX[..] && (bytes[3] == 0x01 || bytes[3] == 0x02)
 }
 
 #[cfg(test)]

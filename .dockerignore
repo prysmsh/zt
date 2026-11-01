@@ -1,0 +1,10 @@
+target/
+**/node_modules/
+**/dist/
+apps/console/.playwright-mcp/
+.git/
+.agents/
+tools/
+oracle/
+vectors/
+*.tar.gz

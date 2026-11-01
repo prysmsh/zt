@@ -120,6 +120,9 @@ pub struct NodeCredential {
     ed_signature: [u8; ED25519_SIG_LEN],
     pq_signature: Vec<u8>,
     pq_public_key: Vec<u8>,
+    /// The original wire bytes, when the credential was parsed without a
+    /// trust anchor.
+    raw: Option<Vec<u8>>,
 }
 
 impl NodeCredential {
@@ -255,12 +258,80 @@ impl NodeCredential {
             ed_signature,
             pq_signature,
             pq_public_key,
+            raw: None,
         })
     }
 
     /// Check whether the credential is still valid at the given timestamp.
     pub fn is_valid_at(&self, now_unix: u64) -> bool {
         now_unix < self.not_after
+    }
+
+    /// Rebuild a credential from its serialized form without verifying it.
+    ///
+    /// This is used when a credential arrives on the wire and the trust
+    /// anchor is not yet known. The returned credential carries the
+    /// unverified bytes; callers must verify it against a trusted
+    /// controller before relying on any of its fields.
+    ///
+    /// The `network_id` and `address` are read from the signed body, so they
+    /// cannot be forged without invalidating the signature.
+    pub fn from_parts(
+        bytes: Vec<u8>,
+        network_id: u64,
+        node_address: Address,
+    ) -> Self {
+        let public_key = if bytes.len() >= 39 {
+            let mut key = [0u8; PUBLIC_KEY_LEN];
+            key.copy_from_slice(&bytes[39..39 + PUBLIC_KEY_LEN]);
+            key
+        } else {
+            [0u8; PUBLIC_KEY_LEN]
+        };
+
+        let (issued_at, not_after, ttl_secs) = if bytes.len() >= 39 {
+            let mut issued = [0u8; 8];
+            issued.copy_from_slice(&bytes[19..27]);
+            let mut expires = [0u8; 8];
+            expires.copy_from_slice(&bytes[27..35]);
+            let mut ttl = [0u8; 4];
+            ttl.copy_from_slice(&bytes[35..39]);
+            (
+                u64::from_be_bytes(issued),
+                u64::from_be_bytes(expires),
+                u32::from_be_bytes(ttl),
+            )
+        } else {
+            (0, 0, 0)
+        };
+
+        let controller_id = if bytes.len() >= 87 {
+            let mut id = [0u8; CONTROLLER_ID_LEN];
+            id.copy_from_slice(&bytes[71..87]);
+            id
+        } else {
+            [0u8; CONTROLLER_ID_LEN]
+        };
+
+        Self {
+            network_id,
+            node_address,
+            public_key,
+            issued_at,
+            not_after,
+            ttl_secs,
+            controller_id,
+            nonce: [0u8; NONCE_LEN],
+            ed_signature: [0u8; ED25519_SIG_LEN],
+            pq_signature: Vec::new(),
+            pq_public_key: Vec::new(),
+            raw: Some(bytes),
+        }
+    }
+
+    /// The raw serialized credential, if it was built from wire bytes.
+    pub fn raw_bytes(&self) -> Option<&[u8]> {
+        self.raw.as_deref()
     }
 
     /// Check whether the credential is valid at the given timestamp and was
@@ -308,6 +379,23 @@ impl ControllerIdentity {
     /// The controller's Ed25519 public key — the trust anchor.
     pub fn public_key(&self) -> [u8; PUBLIC_KEY_LEN] {
         self.identity.public_key_bytes()
+    }
+
+    /// The controller's Ed25519 private key seed.
+    ///
+    /// Exposed so a controller can persist and restore its signing identity.
+    /// Callers must never log or transmit this value.
+    pub fn private_key_seed(&self) -> [u8; crate::identity::PRIVATE_KEY_LEN] {
+        self.identity.private_key_bytes()
+    }
+
+    /// Restore a controller identity from a previously persisted Ed25519 seed.
+    ///
+    /// The ML-DSA-65 key is regenerated. It is not part of the persisted
+    /// secret because it is only needed for signing new credentials; nodes
+    /// pin it through the Ed25519 signature on each credential.
+    pub fn from_private_key_seed(seed: &[u8; crate::identity::PRIVATE_KEY_LEN]) -> Self {
+        Self::new(Identity::from_bytes(seed))
     }
 
     /// The controller's ML-DSA-65 public key.
@@ -360,6 +448,7 @@ impl ControllerIdentity {
             ed_signature,
             pq_signature,
             pq_public_key,
+            raw: None,
         }
     }
 }

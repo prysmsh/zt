@@ -73,6 +73,7 @@
 
 use crate::error::{Error, Result};
 use crate::identity::Identity;
+use crate::membership::{ControllerTrust, Membership};
 use crate::noise::{SymmetricState, PROTOCOL_NAME};
 use crate::pq::{KemSuite, MlDsa65KeyPair, SigSuite};
 use crate::symmetric::SymmetricKey;
@@ -85,6 +86,14 @@ pub const MSG_INIT: u8 = 0x01;
 /// Message type: handshake response.
 pub const MSG_RESPONSE: u8 = 0x02;
 
+/// Magic prefix identifying a native ZT-next handshake datagram.
+///
+/// The prefix is `0x00 0x5a 0x54 0x00`, matching the data-plane magic so
+/// that both native formats are recognisable by inspection. It exists
+/// because WireGuard uses message types `0x01` and `0x02` as well, so a
+/// bare type byte cannot distinguish the two protocols.
+pub const HANDSHAKE_MAGIC: [u8; 4] = [0x00, 0x5a, 0x54, 0x01];
+
 /// Field tag: ephemeral X25519 public key.
 pub const TAG_EPHEMERAL: u8 = 0x01;
 /// Field tag: static Ed25519 public key.
@@ -93,6 +102,8 @@ pub const TAG_STATIC: u8 = 0x02;
 pub const TAG_MLKEM: u8 = 0x03;
 /// Field tag: encrypted payload.
 pub const TAG_PAYLOAD: u8 = 0x04;
+/// Field tag: the sender's network membership credentials.
+pub const TAG_MEMBERSHIP: u8 = 0x05;
 
 /// The number of signature bytes for a given signature suite.
 ///
@@ -248,9 +259,14 @@ impl Message {
     }
 
     /// Serialize to the wire format.
+    ///
+    /// The datagram begins with [`HANDSHAKE_MAGIC`], which identifies the
+    /// native handshake unambiguously, followed by the message type and the
+    /// fields.
     pub fn serialize(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(256);
-        out.push(self.msg_type);
+        out.extend_from_slice(&HANDSHAKE_MAGIC);
+        out[3] = self.msg_type;
         for (tag, value) in &self.fields {
             out.push(*tag);
             out.extend_from_slice(&(value.len() as u16).to_be_bytes());
@@ -261,15 +277,17 @@ impl Message {
 
     /// Parse from the wire format.
     ///
-    /// A message must contain at least the type byte and one complete field.
-    /// A bare type byte is rejected: accepting it would allow an empty
-    /// message to be treated as valid.
+    /// The datagram must begin with [`HANDSHAKE_MAGIC`]. A message must
+    /// contain at least the magic, the type byte, and one complete field.
     pub fn deserialize(bytes: &[u8]) -> Result<Message> {
-        if bytes.len() < 4 {
+        if bytes.len() < 8 {
             return Err(Error::InvalidLength);
         }
-        let msg_type = bytes[0];
-        let mut pos = 1usize;
+        if bytes[..3] != HANDSHAKE_MAGIC[..3] {
+            return Err(Error::InvalidKey("not a ZT-next handshake"));
+        }
+        let msg_type = bytes[3];
+        let mut pos = 4usize;
         let mut fields = Vec::new();
 
         while pos < bytes.len() {
@@ -352,6 +370,11 @@ pub struct Initiator {
     peer: PeerStatic,
     x25519_ephemeral: Option<[u8; 32]>,
     mlkem_dk: Option<crate::pq::MlKem768KeyPair>,
+    /// The membership credentials presented to the peer.
+    ///
+    /// A node without credentials cannot join a network, so this is set
+    /// before the handshake starts.
+    membership: Option<Membership>,
 }
 
 impl Initiator {
@@ -390,7 +413,16 @@ impl Initiator {
             peer,
             x25519_ephemeral: x_eph,
             mlkem_dk,
+            membership: None,
         })
+    }
+
+    /// Present the given membership credentials to the peer.
+    ///
+    /// The credentials are included in the first message and bound into the
+    /// handshake transcript, so they cannot be swapped after the fact.
+    pub fn set_membership(&mut self, membership: Membership) {
+        self.membership = Some(membership);
     }
 
     /// Produce the first message.
@@ -414,6 +446,18 @@ impl Initiator {
             let ek = kp.encapsulation_key();
             self.state.mix_hash(&ek);
             fields.push((TAG_MLKEM, ek));
+        }
+
+        // --- the initiator's membership credentials ---
+        // The credentials are mixed into the transcript, so the signature
+        // covers them. A peer cannot swap them after the handshake without
+        // invalidating the signature.
+        if let Some(membership) = &self.membership {
+            if !membership.is_empty() {
+                let encoded = membership.serialize();
+                self.state.mix_hash(&encoded);
+                fields.push((TAG_MEMBERSHIP, encoded));
+            }
         }
 
         // --- payload: the hybrid signature over the transcript ---
@@ -587,6 +631,13 @@ pub struct Responder {
     pending_ek: Option<Vec<u8>>,
     peer_ed25519: Option<[u8; 32]>,
     peer_ml_dsa: Vec<u8>,
+    /// The controllers this node trusts.
+    trust: ControllerTrust,
+    /// The membership the peer presented, once verified.
+    peer_membership: Option<Membership>,
+    /// When credentials are required. When false, a peer without
+    /// credentials may still connect.
+    require_membership: bool,
 }
 
 impl Responder {
@@ -616,7 +667,30 @@ impl Responder {
             pending_ek: None,
             peer_ed25519: None,
             peer_ml_dsa: Vec::new(),
+            trust: ControllerTrust::new(),
+            peer_membership: None,
+            require_membership: false,
         })
+    }
+
+    /// Trust the given controllers.
+    ///
+    /// Credentials signed by any other controller are rejected.
+    pub fn set_trust(&mut self, trust: ControllerTrust) {
+        self.trust = trust;
+    }
+
+    /// Require the peer to present valid membership credentials.
+    ///
+    /// This is the default for a node that belongs to a network: an
+    /// unauthenticated peer must not be able to join.
+    pub fn require_membership(&mut self, required: bool) {
+        self.require_membership = required;
+    }
+
+    /// The membership the peer presented, once verified.
+    pub fn peer_membership(&self) -> Option<&Membership> {
+        self.peer_membership.as_ref()
     }
 
     /// Process the initiator's first message.
@@ -666,6 +740,27 @@ impl Responder {
             self.pending_ek = Some(ek.to_vec());
         }
 
+        // --- the initiator's membership credentials ---
+        // Credentials that are presented are always verified. Presenting
+        // something unverified is worse than presenting nothing, because a
+        // peer could otherwise use it to claim membership it does not have.
+        // Only the *presence* of credentials is optional.
+        let membership_bytes = parsed.get(TAG_MEMBERSHIP);
+        let membership = match membership_bytes {
+            Some(bytes) => {
+                let membership = Membership::deserialize(bytes)?;
+                self.verify_membership(&membership)?;
+                self.state.mix_hash(bytes);
+                Some(membership)
+            }
+            None => {
+                if self.require_membership {
+                    return Err(Error::AuthenticationFailed);
+                }
+                None
+            }
+        };
+
         // --- payload ---
         let encrypted = parsed
             .get(TAG_PAYLOAD)
@@ -675,6 +770,37 @@ impl Responder {
         let expected_hash = self.state.handshake_hash();
         let payload = self.state.decrypt_and_hash(&key, encrypted)?;
         self.verify_initiator_signature(&payload, &expected_hash)?;
+
+        self.peer_membership = membership;
+        Ok(())
+    }
+
+    /// Verify the membership credentials a peer presented.
+    ///
+    /// Each credential must be signed by a trusted controller, must not have
+    /// expired, and must be bound to the peer's own static key. The last
+    /// check is what stops a peer from replaying someone else's credential.
+    fn verify_membership(&self, membership: &Membership) -> Result<()> {
+        if membership.is_empty() {
+            return Err(Error::AuthenticationFailed);
+        }
+
+        let peer_key = self
+            .peer_ed25519
+            .ok_or(Error::InvalidKey("peer static key missing"))?;
+
+        let now = crate::time::now_unix();
+
+        for entry in membership.entries() {
+            // The credential must be bound to the peer that presented it.
+            if !crate::membership::credential_matches_key(&entry.credential, &peer_key) {
+                return Err(Error::AuthenticationFailed);
+            }
+
+            // The credential must be signed by a controller we trust, and
+            // must not have expired.
+            self.trust.verify(&entry.credential, now)?;
+        }
 
         Ok(())
     }
@@ -855,6 +981,261 @@ mod tests {
         resp.read_message_1(&m1)?;
         let m2 = resp.write_message_2()?;
         init.read_message_2(&m2)
+    }
+
+    /// Build a membership for an identity, signed by a controller.
+fn membership_for(
+    controller: &crate::credential::ControllerIdentity,
+    identity: &Identity,
+    network_id: u64,
+    now: u64,
+) -> Membership {
+    let mut membership = Membership::new();
+    membership.add(
+        network_id,
+        controller.issue(
+            network_id,
+            identity.address_for_network(network_id),
+            &identity.public_key_bytes(),
+            now,
+            3600,
+            &[9u8; 16],
+        ),
+    );
+    membership
+}
+
+/// Build a trust set that accepts the given controller.
+fn trust_for(controller: &crate::credential::ControllerIdentity) -> ControllerTrust {
+    let mut trust = ControllerTrust::new();
+    trust.add(crate::membership::TrustedController {
+        public_key: controller.public_key(),
+        controller_id: *controller.controller_id(),
+    });
+    trust
+}
+
+#[test]
+    fn a_peer_with_valid_credentials_is_accepted() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(
+            &controller,
+            &client.identity,
+            42,
+            now,
+        ));
+
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.set_trust(trust_for(&controller));
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        resp.read_message_1(&m1).expect("credentialed peer is accepted");
+
+        // The verified membership is available to the responder.
+        let membership = resp.peer_membership().expect("membership");
+        assert_eq!(membership.len(), 1);
+        assert_eq!(membership.for_network(42).expect("entry").network_id, 42);
+    }
+
+    #[test]
+    fn a_peer_without_credentials_is_rejected() {
+        let (client, server) = identities();
+        let mut init = Initiator::begin(
+            client,
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        assert!(resp.read_message_1(&m1).is_err());
+    }
+
+    #[test]
+    fn a_peer_with_an_untrusted_credential_is_rejected() {
+        let now = crate::time::now_unix();
+
+        // The peer presents a credential from a controller we do not trust.
+        let rogue = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let trusted = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(&rogue, &client.identity, 42, now));
+
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.set_trust(trust_for(&trusted));
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        assert!(resp.read_message_1(&m1).is_err());
+    }
+
+    #[test]
+    fn a_peer_replaying_another_nodes_credential_is_rejected() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let victim = Identity::generate().unwrap();
+        let attacker = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        // The attacker presents the victim's credential.
+        let mut init = Initiator::begin(
+            attacker.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(&controller, &victim, 42, now));
+
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.set_trust(trust_for(&controller));
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        assert!(
+            resp.read_message_1(&m1).is_err(),
+            "a credential bound to another key must be rejected"
+        );
+    }
+
+    #[test]
+    fn an_expired_credential_is_rejected() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        // The credential expired a moment ago.
+        init.set_membership(membership_for(
+            &controller,
+            &client.identity,
+            42,
+            now.saturating_sub(7200),
+        ));
+
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.set_trust(trust_for(&controller));
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        assert!(resp.read_message_1(&m1).is_err());
+    }
+
+    #[test]
+    fn membership_without_a_trust_set_is_rejected() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(&controller, &client.identity, 42, now));
+
+        // No trust set at all, so nothing can be verified.
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.require_membership(true);
+
+        let m1 = init.write_message_1().unwrap();
+        assert!(resp.read_message_1(&m1).is_err());
+    }
+
+    #[test]
+    fn the_membership_is_bound_into_the_transcript() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(&controller, &client.identity, 42, now));
+
+        let m1 = init.write_message_1().unwrap();
+
+        // The membership travels in the first message.
+        let parsed = Message::deserialize(&m1).unwrap();
+        assert!(parsed.get(TAG_MEMBERSHIP).is_some());
+
+        // A responder that does not require membership still completes the
+        // handshake, because it can verify the credentials it was given.
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        resp.set_trust(trust_for(&controller));
+        resp.read_message_1(&m1).expect("peer accepted");
+        let m2 = resp.write_message_2().unwrap();
+        init.read_message_2(&m2).expect("handshake completes");
+    }
+
+    #[test]
+    fn a_responder_without_trust_rejects_presented_credentials() {
+        let now = crate::time::now_unix();
+
+        let controller = crate::credential::ControllerIdentity::new(Identity::generate().unwrap());
+        let client = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+        let server = StaticIdentity::new(Identity::generate().unwrap()).unwrap();
+
+        let mut init = Initiator::begin(
+            client.clone(),
+            peer_of(&server),
+            KemSuite::X25519,
+            SigSuite::Ed25519,
+        )
+        .unwrap();
+        init.set_membership(membership_for(&controller, &client.identity, 42, now));
+
+        // Membership is not required, but there is no trust set, so the
+        // presented credentials cannot be verified and are refused.
+        let mut resp = Responder::begin(server, KemSuite::X25519, SigSuite::Ed25519).unwrap();
+        let m1 = init.write_message_1().unwrap();
+        assert!(resp.read_message_1(&m1).is_err());
     }
 
     #[test]

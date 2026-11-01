@@ -1,0 +1,30 @@
+[package]
+name = "zt-legacy"
+description = "Foreign-protocol dialects for ZT-next: WireGuard/Tailscale and legacy ZeroTier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zt-crypto.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+blake3.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+rand.workspace = true
+sha2.workspace = true
+x25519-dalek.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+x25519-dalek.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

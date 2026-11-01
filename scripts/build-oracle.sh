@@ -42,6 +42,8 @@ g++ -std=c++17 -O2 -o "$OUT_DIR/zt-oracle" \
 	"$ZT_ROOT/node/SHA512.cpp" \
 	"$ZT_ROOT/node/Salsa20.cpp" \
 	"$ZT_ROOT/node/Poly1305.cpp" \
+	"$ZT_ROOT/node/CertificateOfMembership.cpp" \
+	"$ZT_ROOT/node/InetAddress.cpp" \
 	"$ZT_ROOT/node/Utils.cpp" \
 	-lcrypto
 

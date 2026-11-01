@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "track": "legacy",
+  "op": "cipher",
+  "vectors": [
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "cipher.salsa20",
+      "description": "Salsa20/12 keystream",
+      "inputs": [
+        {"name": "key", "value": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc"},
+        {"name": "iv", "value": "05101b26313c4752"}
+      ],
+      "outputs": [
+        {"name": "keystream", "value": "4e646dd66dc10dcb8061245158cf31e1dda7c91c4a42d8ad75c94900713ee86eab31adef02213c65c0bb87289ae64a653362777f369973a42cb541b5973c6fda816aa802c74843a7324be6ee0e1ddcae663b450bf84d88a3f237e1b9ca16ca8b5ce10af26922854da733e1c31a222db6257ecef36631bc0eaefe04487a6187ef"}
+      ]
+    },
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "cipher.salsa20_mac_key",
+      "description": "Poly1305 key derived from the Salsa20 keystream",
+      "inputs": [
+        {"name": "key", "value": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc"},
+        {"name": "iv", "value": "05101b26313c4752"}
+      ],
+      "outputs": [
+        {"name": "mac_key", "value": "4e646dd66dc10dcb8061245158cf31e1dda7c91c4a42d8ad75c94900713ee86e"}
+      ]
+    },
+    {
+      "version": 1,
+      "track": "legacy",
+      "op": "cipher.poly1305",
+      "description": "Poly1305 MAC over a fixed message",
+      "inputs": [
+        {"name": "key", "value": "010e1b2835424f5c697683909daab7c4d1deebf805121f2c394653606d7a8794"},
+        {"name": "message", "value": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"}
+      ],
+      "outputs": [
+        {"name": "mac", "value": "005a074e9ad46e1acbfc7a6a1570f5e5"}
+      ]
+    }
+  ]
+}

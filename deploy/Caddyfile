@@ -1,0 +1,44 @@
+# The ZT-next console.
+#
+# Two origins are served here:
+#
+#   /            → the console's static bundle
+#   /api/        → the controller, behind Caddy so the controller never
+#                  holds a public socket
+#   /auth/       → the OIDC callback, which the console's JavaScript reads
+#
+# The controller requires a bearer token on every route except the health
+# check. The console obtains the token through the authorization code flow
+# with PKCE and sends it on every request.
+
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+{$ZT_PUBLIC_HOST} {
+	encode zstd gzip
+
+	# The API. The controller is not published, so it is reached over the
+	# compose network only.
+	handle /api/* {
+		reverse_proxy controller:8080
+	}
+
+	# The OIDC callback. The console's JavaScript reads the code from the
+	# URL, so the response has to be the console's page rather than a
+	# redirect that loses the fragment.
+	handle /auth/callback {
+		rewrite * /index.html
+		reverse_proxy console:80
+	}
+
+	handle {
+		reverse_proxy console:80
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

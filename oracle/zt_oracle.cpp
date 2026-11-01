@@ -39,8 +39,28 @@
 #include "node/Identity.hpp"
 #include "node/SHA512.hpp"
 #include "node/Salsa20.hpp"
+#include "node/Poly1305.hpp"
+#include "node/CertificateOfMembership.hpp"
+#include "node/CertificateOfOwnership.hpp"
+#include "node/MAC.hpp"
+#include "node/InetAddress.hpp"
+#include "node/Topology.hpp"
+#include "node/Switch.hpp"
 
 using namespace ZeroTier;
+
+// The Certificate of Membership's verify() path reaches into the topology
+// and switch to look up a controller identity. The oracle only needs the
+// credential's construction and serialization, so these stubs satisfy the
+// linker without pulling in the full node implementation.
+Identity Topology::getIdentity(void *, const Address &) {
+	return Identity();
+}
+
+void Switch::requestWhois(void *, long, const Address &) {
+}
+
+
 
 // ---------------------------------------------------------------------------
 // Minimal JSON emission. Deliberately dependency-free: the oracle must build
@@ -224,7 +244,10 @@ void genKeyAgreement(const std::string& dir) {
 	Vector v;
 	v.op = "ecc.agree";
 	v.description = "X25519 shared secret";
-	v.addInput("public_a", a.pub.data, ZT_ECC_PUBLIC_KEY_SET_LEN);
+	// The private key sets are exported so the Rust side can recompute the
+	// shared secret. Without them the vector is unverifiable: a shared
+	// secret cannot be derived from two public keys.
+	v.addInput("private_a", a.priv.data, ZT_ECC_PRIVATE_KEY_SET_LEN);
 	v.addInput("public_b", b.pub.data, ZT_ECC_PUBLIC_KEY_SET_LEN);
 	v.addOutput("shared_secret", shared, 32);
 	vectors.push_back(v);
@@ -277,6 +300,147 @@ void genHash(const std::string& dir) {
 	writeVectorFile(dir + "/hash_sha512.json", "hash.sha512", vectors);
 }
 
+// Emit Salsa20/12 keystream and Poly1305 MAC vectors so the Rust legacy
+// dialect can be verified against ZeroTier's own implementations.
+void genCipher(const std::string& dir) {
+	std::vector<Vector> vectors;
+
+	// Salsa20/12 keystream. ZeroTier's Salsa20::init uses a permuted state
+	// layout, so this vector pins that arrangement.
+	{
+		uint8_t key[32];
+		uint8_t iv[8];
+		for (unsigned int i = 0; i < 32; ++i) key[i] = (uint8_t)(i * 7 + 3);
+		for (unsigned int i = 0; i < 8; ++i) iv[i] = (uint8_t)(i * 11 + 5);
+
+		Salsa20 s20(key, iv);
+		uint8_t stream[128];
+		memset(stream, 0, sizeof(stream));
+		s20.crypt12(stream, stream, sizeof(stream));
+
+		Vector v;
+		v.op = "cipher.salsa20";
+		v.description = "Salsa20/12 keystream";
+		v.addInput("key", key, 32);
+		v.addInput("iv", iv, 8);
+		v.addOutput("keystream", stream, sizeof(stream));
+		vectors.push_back(v);
+	}
+
+	// The MAC key that Packet::armor derives from the Salsa20 keystream.
+	// This is the value that the packet layer consumes, so it must be
+	// pinned separately from Poly1305 in isolation.
+	{
+		uint8_t key[32];
+		uint8_t iv[8];
+		for (unsigned int i = 0; i < 32; ++i) key[i] = (uint8_t)(i * 7 + 3);
+		for (unsigned int i = 0; i < 8; ++i) iv[i] = (uint8_t)(i * 11 + 5);
+
+		Salsa20 s20(key, iv);
+		uint8_t macKey[32];
+		memset(macKey, 0, sizeof(macKey));
+		s20.crypt12(macKey, macKey, sizeof(macKey));
+
+		Vector v;
+		v.op = "cipher.salsa20_mac_key";
+		v.description = "Poly1305 key derived from the Salsa20 keystream";
+		v.addInput("key", key, 32);
+		v.addInput("iv", iv, 8);
+		v.addOutput("mac_key", macKey, 32);
+		vectors.push_back(v);
+	}
+
+	// Poly1305 over a fixed message with a fixed one-time key.
+	{
+		uint8_t key[32];
+		for (unsigned int i = 0; i < 32; ++i) key[i] = (uint8_t)(i * 13 + 1);
+
+		uint8_t mac[16];
+		Poly1305::compute(mac, SEED_A, 32, key);
+
+		Vector v;
+		v.op = "cipher.poly1305";
+		v.description = "Poly1305 MAC over a fixed message";
+		v.addInput("key", key, 32);
+		v.addInput("message", SEED_A, 32);
+		v.addOutput("mac", mac, 16);
+		vectors.push_back(v);
+	}
+
+	writeVectorFile(dir + "/cipher_vectors.json", "cipher", vectors);
+}
+
+// Emit Certificate of Membership and Certificate of Ownership vectors so
+// the Rust legacy dialect can be verified against ZeroTier's own formats.
+void genCredentials(const std::string& dir) {
+	std::vector<Vector> vectors;
+
+	// Identities own their key material, and the COM embeds a hash of the
+	// member's public key set, so use the Identity API directly.
+	Identity member;
+	member.generate();
+	Identity controller;
+	controller.generate();
+
+	// A Certificate of Membership as a network controller would issue it.
+	{
+		const uint64_t timestamp = 1700000000ULL;
+		const uint64_t timestampMaxDelta = 60ULL;
+		const uint64_t nwid = 0x123456789abcdef0ULL;
+
+		CertificateOfMembership com(timestamp, timestampMaxDelta, nwid, member);
+		com.sign(controller);
+
+		Buffer<1024> buf;
+		com.serialize(buf);
+
+		Vector v;
+		v.op = "credential.com";
+		v.description = "Certificate of Membership as issued by a controller";
+		v.addInput("member_public_key", member.publicKey().data, ZT_ECC_PUBLIC_KEY_SET_LEN);
+		v.addInput("controller_public_key", controller.publicKey().data, ZT_ECC_PUBLIC_KEY_SET_LEN);
+		v.addInput("timestamp", &timestamp, 8);
+		v.addInput("timestamp_max_delta", &timestampMaxDelta, 8);
+		v.addInput("network_id", &nwid, 8);
+		v.addOutput("serialized", buf.field(0, (unsigned int)buf.size()), (unsigned int)buf.size());
+		vectors.push_back(v);
+	}
+
+	// A Certificate of Ownership claiming a MAC address and an IPv4 address.
+	{
+		const uint64_t nwid = 0x123456789abcdef0ULL;
+		const uint64_t ts = 1700000000ULL;
+		const uint64_t flags = 0;
+
+		CertificateOfOwnership coo(nwid, ts, flags, member);
+		{
+			const unsigned char macBytes[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 };
+			MAC mac(macBytes, 6);
+			coo.addThing(mac);
+		}
+		{
+			// An IPv4 address of 10.0.0.42.
+			InetAddress ip(0x2a00000a, 0);
+			coo.addThing(ip);
+		}
+
+		Buffer<1024> buf;
+		coo.serialize(buf);
+
+		Vector v;
+		v.op = "credential.coo";
+		v.description = "Certificate of Ownership claiming a MAC and IPv4 address";
+		v.addInput("member_public_key", member.publicKey().data, ZT_ECC_PUBLIC_KEY_SET_LEN);
+		v.addInput("network_id", &nwid, 8);
+		v.addInput("timestamp", &ts, 8);
+		v.addInput("flags", &flags, 8);
+		v.addOutput("serialized", buf.field(0, (unsigned int)buf.size()), (unsigned int)buf.size());
+		vectors.push_back(v);
+	}
+
+	writeVectorFile(dir + "/credential_vectors.json", "credential", vectors);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -297,6 +461,8 @@ int main(int argc, char** argv) {
 	genKeyAgreement(dir);
 	genSignatures(dir);
 	genHash(dir);
+	genCipher(dir);
+	genCredentials(dir);
 
 	std::printf("legacy oracle vectors written to %s\n", dir.c_str());
 	return 0;

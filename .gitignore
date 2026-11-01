@@ -12,3 +12,14 @@ Cargo.lock.bak
 .idea/
 .vscode/
 *.swp
+
+# Node
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+# The installed agent skills
+/.agents/
+
+# Deployment secrets
+deploy/.env
