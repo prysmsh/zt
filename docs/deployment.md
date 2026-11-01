@@ -19,7 +19,7 @@ Caddy that terminates TLS.
                                             │ verifies tokens
                                      ┌──────▼───────────┐
                                      │  Verity (OIDC)   │
-                                     │  auth.prysm.sh   │
+                                     │  prysm.sh        │
                                      └──────────────────┘
 ```
 
@@ -157,6 +157,31 @@ A mismatch is silent. The application is registered, the sign-in works,
 the token is issued, and the claim is missing — or the token is opaque, or
 the scope is dropped.
 
+The console's own `ZT_OIDC_ISSUER` must be the provider's issuer URL, so
+the controller verifies the issuer the token actually carries.
+
+### The admin console needs the cloud API
+
+Verity's own admin console is a separate application, and it asks for the
+Cloud API resource on its own origin. That resource needs a scope the
+console's application may request and the operator's role carries, or the
+console lists no tenants and refuses to go on.
+
+`deploy/verity/grant-console-cloud-api.sql` registers the resource on the
+admin origin, links it to the console's application, and grants it to the
+admin tenant's `user` and `admin` roles. Run it once against the
+provider's database:
+
+```bash
+docker cp grant-console-cloud-api.sql verity-deploy-postgres-1:/tmp/grant.sql
+docker exec verity-deploy-postgres-1 psql -U postgres -d logto -f /tmp/grant.sql
+```
+
+It also clears the protected-app metadata of the applications that are not
+protected apps. The console validates the shape of every application the
+management API returns, and a partial metadata object fails that check, so
+the application list shows an error instead of the applications.
+
 The console's own `ZT_OIDC_AUDIENCE` must be the resource's indicator, so
 the controller verifies the audience the token actually carries.
 
@@ -164,7 +189,7 @@ the controller verifies the audience the token actually carries.
 
 ```bash
 # The provider must advertise the roles scope.
-curl -s https://auth.prysm.sh/oidc/.well-known/openid-configuration | jq .scopes_supported
+curl -s https://prysm.sh/oidc/.well-known/openid-configuration | jq .scopes_supported
 
 # A token must carry the role.
 #   "roles": ["zt:operator"]
@@ -201,8 +226,8 @@ The certificate covers every hostname the origin serves:
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout key.pem -out cert.pem \
-  -days 3650 -subj "/CN=auth.prysm.sh" \
-  -addext "subjectAltName=DNS:auth.prysm.sh,DNS:*.auth.prysm.sh,DNS:prysm.sh,DNS:zt.hardening.dev"
+  -days 3650 -subj "/CN=prysm.sh" \
+  -addext "subjectAltName=DNS:prysm.sh,DNS:*.prysm.sh,DNS:admin.prysm.sh,DNS:zt.hardening.dev"
 ```
 
 ## Routing the hostname
@@ -251,8 +276,8 @@ application, and the management API's CORS allowlist — which is built from
 `ADMIN_ENDPOINT` — would collide with the core tenant's origin.
 
 A separate hostname is the clean way to differ. A separate port also works,
-and the old `https://auth.prysm.sh:8443/console` address is kept working so
-that a bookmark does not break during the rollout.
+and the stack listened on `:8443` while the hostname was settling; that
+listener is retired now, and the stack publishes only 80 and 443.
 
 ### The origin is embedded in the resource indicators
 
@@ -280,14 +305,27 @@ These live in the Verity deployment, not in this repository:
 | `ENDPOINT` | `https://prysm.sh` |
 | `ADMIN_ENDPOINT` | `https://admin.prysm.sh` |
 | `ADMIN_PORT` | `3003` |
+| `IS_CLOUD` | `1` |
+
+`IS_CLOUD` has to be set. The console bundle is built for cloud mode: it
+reads the current user through `/a` and lists the tenants through
+`/api/tenants` on its own origin. The server only serves those routes when
+it runs in the same mode. Without it the console never finishes loading and
+stops at its spinner.
+
+Two database grants follow from it. The console asks for the Cloud API
+resource on its own origin, so that resource needs a scope the console's
+application may request and the operator's role carries, and an application
+that is not a protected app must have null protected-app metadata rather
+than a partial one. `deploy/verity/grant-console-cloud-api.sql` does both.
 
 The origin's certificate must cover both hostnames:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout key.pem -out cert.pem \
-  -days 3650 -subj "/CN=auth.prysm.sh" \
-  -addext "subjectAltName=DNS:auth.prysm.sh,DNS:*.auth.prysm.sh,DNS:prysm.sh,DNS:*.prysm.sh,DNS:admin.prysm.sh,DNS:zt.hardening.dev"
+  -days 3650 -subj "/CN=prysm.sh" \
+  -addext "subjectAltName=DNS:prysm.sh,DNS:*.prysm.sh,DNS:admin.prysm.sh,DNS:zt.hardening.dev"
 ```
 
 ### The console's loading screen

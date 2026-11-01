@@ -21,7 +21,7 @@ services:
       ZT_CONTROLLER_DATA_DIR: /var/lib/zt-next
       # The OIDC provider. The JWKS endpoint is discovered from the issuer
       # when ZT_OIDC_JWKS is not set.
-      ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://auth.prysm.sh/oidc}
+      ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://prysm.sh/oidc}
       ZT_OIDC_AUDIENCE: ${ZT_OIDC_AUDIENCE:-zt-console-app-001}
       ZT_OIDC_OPERATOR_ROLE: ${ZT_OIDC_OPERATOR_ROLE:-zt:operator}
       ZT_OIDC_TENANT_SCOPE: ${ZT_OIDC_TENANT_SCOPE:-zt:tenant}
@@ -48,7 +48,7 @@ services:
         # redirect URI registered with the OIDC provider.
         VITE_ZT_PUBLIC_ORIGIN: ${ZT_PUBLIC_ORIGIN:-}
         VITE_ZT_PUBLIC_SCHEME: ${ZT_PUBLIC_SCHEME:-https}
-        VITE_ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://auth.prysm.sh/oidc}
+        VITE_ZT_OIDC_ISSUER: ${ZT_OIDC_ISSUER:-https://prysm.sh/oidc}
         VITE_ZT_OIDC_CLIENT_ID: ${ZT_OIDC_CLIENT_ID:-zt-console-app-001}
         VITE_ZT_OIDC_AUDIENCE: ${ZT_OIDC_AUDIENCE:-zt-console-app-001}
     restart: unless-stopped
@@ -81,7 +81,7 @@ services:
     networks:
       - default
       # The Verity stack's network, so the Caddy that terminates TLS for
-      # auth.prysm.sh can also route zt.hardening.dev here.
+      # prysm.sh can also route zt.hardening.dev here.
       - verity
 
 networks:
