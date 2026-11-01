@@ -101,6 +101,10 @@ fn build_router(controller: Controller) -> Router {
             post(reject_pending_nodes),
         )
         .route(
+            "/api/v1/t/{tenant}/nodes/bulk-revoke",
+            post(bulk_revoke_nodes),
+        )
+        .route(
             "/api/v1/t/{tenant}/nodes/{id}",
             get(get_node).delete(revoke_node),
         )
@@ -430,6 +434,25 @@ async fn reject_pending_nodes(
         .reject_pending_nodes(&tenant, &principal.actor())
         .await?;
     Ok(Json(serde_json::json!({ "rejected": rejected })))
+}
+
+/// Revoke several nodes at once, as the console's selection does.
+#[derive(Debug, Deserialize)]
+struct BulkRevokeRequest {
+    /// The node identifiers to revoke.
+    ids: Vec<String>,
+}
+
+async fn bulk_revoke_nodes(
+    State(controller): State<Controller>,
+    principal: Principal,
+    Path(tenant): Path<String>,
+    Json(request): Json<BulkRevokeRequest>,
+) -> Result<Json<serde_json::Value>, ControllerError> {
+    let revoked = controller
+        .revoke_nodes_bulk(&tenant, &request.ids, &principal.actor())
+        .await?;
+    Ok(Json(serde_json::json!({ "revoked": revoked })))
 }
 
 async fn tenant_billing(

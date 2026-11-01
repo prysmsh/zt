@@ -111,6 +111,8 @@ export interface ApiClient {
   revokeNode(nodeId: string): Promise<void>
   /** Revoke every pending join request at once. Returns how many. */
   rejectPendingNodes(): Promise<number>
+  /** Revoke a picked set of nodes. Returns how many changed. */
+  revokeNodes(ids: string[]): Promise<number>
   /** Approve a pending node, which lets it collect its credential. */
   approveNode(nodeId: string): Promise<MeshNode>
   renewCredential(nodeId: string): Promise<EnrollNodeResult>
@@ -296,6 +298,17 @@ export function createHttpClient(
         { method: 'POST' },
       )
       return result.rejected
+    },
+    async revokeNodes(ids) {
+      const result = await request<{ revoked: number }>(
+        `${tenantBase}/nodes/bulk-revoke`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        },
+      )
+      return result.revoked
     },
     async approveNode(nodeId) {
       const result = await request<{ node: ControllerNode }>(

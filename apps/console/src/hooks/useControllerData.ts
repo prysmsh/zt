@@ -120,7 +120,7 @@ export function useNetworkSummaries(data: ControllerSnapshot): Network[] {
 /** An item on the attention list. */
 export interface AttentionItem {
   id: string
-  level: 'warning' | 'error'
+  level: 'warning' | 'error' | 'info'
   title: string
   detail: string
   time: string
@@ -151,6 +151,17 @@ export function attentionItems(data: ControllerSnapshot): AttentionItem[] {
   const items: AttentionItem[] = []
 
   for (const node of data.nodes) {
+    // A join request is the one thing on this list the operator must
+    // decide about: until it is approved or rejected, a host is waiting.
+    if (node.awaitingApproval) {
+      items.push({
+        id: `join-${node.id}`,
+        level: 'info',
+        title: `${node.name} asks to join`,
+        detail: 'Approve or reject it on the nodes page.',
+        time: 'now',
+      })
+    }
     // A revoked node is not on this list: the operator withdrew it, so
     // there is nothing to do about it. Its row on the node list says so,
     // and the activity page records when it happened.

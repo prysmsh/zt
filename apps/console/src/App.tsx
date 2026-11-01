@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Activity, AlertTriangle, Boxes, Building2 as Building2Icon, ChevronRight, CircleGauge,
-  FileKey2, Globe2, Menu, Network as NetworkIconLucide, Plus, RadioTower, RefreshCw, Search,
-  Server, ShieldCheck, SlidersHorizontal, Sun, Moon, Waypoints, X, Zap,
+  Activity, AlertTriangle, Boxes, Building2 as Building2Icon, ChevronDown, ChevronRight,
+  CircleGauge, FileKey2, Globe2, Menu, Network as NetworkIconLucide, Plus, RadioTower,
+  RefreshCw, Search, Server, ShieldCheck, SlidersHorizontal, Sun, Moon, Waypoints, X, Zap,
 } from 'lucide-react'
 import type { MeshNode, Network } from './types'
 import { createHttpClient } from './api'
@@ -190,6 +190,10 @@ function NodeTable({
   onOpen,
   onApprove,
   onReject,
+  checked,
+  onToggle,
+  onToggleAll,
+  onClearChecked,
 }: {
   items: MeshNode[]
   onOpen?: (node: MeshNode) => void
@@ -197,12 +201,38 @@ function NodeTable({
   onApprove?: (node: MeshNode) => void
   /** Reject a pending node, which revokes it. */
   onReject?: (node: MeshNode) => void
+  /** The picked node ids, when the page supports selection. */
+  checked?: Set<string>
+  onToggle?: (id: string) => void
+  /** Select every visible row. Undefined when they are already all picked. */
+  onToggleAll?: () => void
+  onClearChecked?: () => void
 }) {
+  const selectRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    if (selectRef.current) {
+      selectRef.current.indeterminate =
+        !!onToggleAll && !!checked && checked.size > 0
+    }
+  }, [checked, onToggleAll, items])
+
+  const selectable = !!(checked && onToggle)
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
+            {selectable ? (
+              <th className="cell-check">
+                <input
+                  ref={selectRef}
+                  type="checkbox"
+                  checked={items.length > 0 && !!checked && items.every((node) => checked.has(node.id))}
+                  onChange={() => (onToggleAll ? onToggleAll() : onClearChecked?.())}
+                  aria-label={onToggleAll ? 'Select all visible nodes' : 'Clear selection'}
+                />
+              </th>
+            ) : null}
             <th>Node</th>
             <th>Network</th>
             <th>Status</th>
@@ -213,63 +243,145 @@ function NodeTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((node) => (
-            <tr key={node.id} className={onOpen ? 'row-clickable' : undefined}>
-              <td>
-                <div className="cell-main">
-                  {onOpen ? (
-                    <button type="button" className="cell-link" onClick={() => onOpen(node)}>
-                      {node.name}
-                    </button>
-                  ) : (
-                    node.name
-                  )}
-                </div>
-                <div className="cell-sub">{node.address}</div>
-              </td>
-              <td>{node.network}</td>
-              <td>
-                <StatusPill status={node.status} />
-              </td>
-              <td>{node.lastSeen}</td>
-              <td>{node.credentialExpires}</td>
-              <td>{node.platform}</td>
-              {onApprove || onReject ? (
+          {items.map((node) => {
+            const isChecked = checked?.has(node.id) ?? false
+            return (
+              <tr
+                key={node.id}
+                className={[
+                  onOpen ? 'row-clickable' : undefined,
+                  isChecked ? 'row-selected' : undefined,
+                ].filter(Boolean).join(' ') || undefined}
+              >
+                {selectable ? (
+                  <td className="cell-check" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => onToggle?.(node.id)}
+                      aria-label={`Select ${node.name}`}
+                    />
+                  </td>
+                ) : null}
                 <td>
-                  {node.awaitingApproval ? (
-                    <span className="cell-actions">
-                      {onApprove ? (
-                        <button
-                          type="button"
-                          className="button primary"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            onApprove(node)
-                          }}
-                        >
-                          Approve
-                        </button>
-                      ) : null}
-                      {onReject ? (
-                        <button
-                          type="button"
-                          className="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            onReject(node)
-                          }}
-                        >
-                          Reject
-                        </button>
-                      ) : null}
-                    </span>
-                  ) : null}
+                  <div className="cell-main">
+                    {onOpen ? (
+                      <button type="button" className="cell-link" onClick={() => onOpen(node)}>
+                        {node.name}
+                      </button>
+                    ) : (
+                      node.name
+                    )}
+                  </div>
+                  <div className="cell-sub">{node.address}</div>
                 </td>
-              ) : null}
-            </tr>
-          ))}
+                <td>{node.network}</td>
+                <td>
+                  <StatusPill status={node.status} />
+                </td>
+                <td>{node.lastSeen}</td>
+                <td>{node.credentialExpires}</td>
+                <td>{node.platform}</td>
+                {onApprove || onReject ? (
+                  <td>
+                    {node.awaitingApproval ? (
+                      <span className="cell-actions">
+                        {onApprove ? (
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onApprove(node)
+                            }}
+                          >
+                            Approve
+                          </button>
+                        ) : null}
+                        {onReject ? (
+                          <button
+                            type="button"
+                            className="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onReject(node)
+                            }}
+                          >
+                            Reject
+                          </button>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </td>
+                ) : null}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/** A filter chip that opens a menu of options. */
+function FilterMenu({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string; count?: number }[]
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent) => {
+      if (anchor.current && !anchor.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const current = options.find((option) => option.value === value)
+  const active = current && current.value !== 'all'
+
+  return (
+    <div className="menu-anchor" ref={anchor}>
+      <button
+        type="button"
+        className={active ? 'filter scope' : 'filter'}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        <SlidersHorizontal size={13} />
+        {active ? current.label : label}
+        <ChevronDown size={11} />
+      </button>
+      {open ? (
+        <div className="menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={option.value === value ? 'menu-item active' : 'menu-item'}
+              onClick={() => {
+                onChange(option.value)
+                setOpen(false)
+              }}
+            >
+              <span>{option.label}</span>
+              {option.count !== undefined ? <span className="menu-count">{option.count}</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -388,7 +500,7 @@ function Overview({
               <div className="attention-list">
                 {attention.slice(0, 6).map((item) => (
                   <div className="attention-item" key={item.id}>
-                    <div className={`attention-icon ${item.level === 'error' ? 'red' : ''}`}>
+                    <div className={`attention-icon ${item.level === 'error' ? 'red' : item.level === 'info' ? 'blue' : ''}`}>
                       <AlertTriangle size={14} />
                     </div>
                     <div>
@@ -504,6 +616,7 @@ function NodesPage({
   api,
   onChanged,
   scope,
+  onScope,
   onClearScope,
 }: {
   data: ControllerSnapshot
@@ -511,23 +624,46 @@ function NodesPage({
   onChanged: () => void
   /** The network the list is narrowed to, when one was picked. */
   scope: string | null
+  onScope: (network: string) => void
   onClearScope: () => void
 }) {
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [enrolling, setEnrolling] = useState(false)
   const [selected, setSelected] = useState<MeshNode | null>(null)
   const [busy, setBusy] = useState(false)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
   const [enrolled, setEnrolled] = useState<{ result: import('./api').EnrollNodeResult; networkName: string } | null>(null)
   const networks = useNetworkSummaries(data)
   const scoped = scope ? data.nodes.filter((node) => node.network === scope) : data.nodes
+
+  const matchesStatus = (node: MeshNode) => {
+    switch (statusFilter) {
+      case 'online':
+        return node.status === 'online'
+      case 'degraded':
+        return node.status === 'degraded'
+      case 'offline':
+        return node.status === 'offline'
+      case 'requests':
+        return !!node.awaitingApproval
+      case 'revoked':
+        return node.status === 'revoked'
+      default:
+        return true
+    }
+  }
+
   const filtered = useMemo(
     () =>
-      scoped.filter((node) =>
-        `${node.name} ${node.address} ${node.network} ${node.tags.join(' ')}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
+      scoped.filter(
+        (node) =>
+          matchesStatus(node) &&
+          `${node.name} ${node.address} ${node.network} ${node.tags.join(' ')}`
+            .toLowerCase()
+            .includes(query.toLowerCase()),
       ),
-    [scoped, query],
+    [scoped, statusFilter, query],
   )
   const scopeName = scope ? networks.find((network) => network.id === scope)?.name : undefined
 
@@ -536,6 +672,32 @@ function NodesPage({
   // credential but have not checked in yet are not up for rejection.
   const pendingCount = data.nodes.filter((node) => node.awaitingApproval).length
   const [rejecting, setRejecting] = useState(false)
+
+  // Selection. A row's checkbox is the only thing that toggles it; the
+  // rest of the row still opens the inspector.
+  const checkedIds = useMemo(
+    () => filtered.filter((node) => checked.has(node.id)),
+    [filtered, checked],
+  )
+  const allChecked = filtered.length > 0 && checkedIds.length === filtered.length
+  const toggle = (id: string) =>
+    setChecked((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = () =>
+    setChecked((current) => {
+      if (filtered.length > 0 && filtered.every((node) => current.has(node.id))) {
+        const next = new Set(current)
+        for (const node of filtered) next.delete(node.id)
+        return next
+      }
+      const next = new Set(current)
+      for (const node of filtered) next.add(node.id)
+      return next
+    })
 
   const handleApprove = async (node: MeshNode) => {
     setBusy(true)
@@ -597,21 +759,54 @@ function NodesPage({
             aria-label="Search nodes"
           />
         </div>
-        <button type="button" className="filter">
-          <SlidersHorizontal size={13} />
-          Status
-        </button>
-        {scopeName ? (
-          <button type="button" className="filter scope" onClick={onClearScope}>
-            {scopeName}
-            <X size={12} />
-          </button>
-        ) : (
-          <button type="button" className="filter">
-            {networks.length} networks
-          </button>
-        )}
+        <FilterMenu
+          label="Status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: 'all', label: 'All statuses' },
+            { value: 'online', label: 'Online', count: data.nodes.filter((n) => n.status === 'online').length },
+            { value: 'degraded', label: 'Degraded', count: data.nodes.filter((n) => n.status === 'degraded').length },
+            { value: 'offline', label: 'Offline', count: data.nodes.filter((n) => n.status === 'offline').length },
+            { value: 'requests', label: 'Join requests', count: pendingCount },
+            { value: 'revoked', label: 'Revoked', count: data.nodes.filter((n) => n.status === 'revoked').length },
+          ]}
+        />
+        <FilterMenu
+          label={scopeName ? `Network: ${scopeName}` : `${networks.length} networks`}
+          value={scope ?? 'all'}
+          onChange={(value) => (value === 'all' ? onClearScope() : onScope(value))}
+          options={[
+            { value: 'all', label: 'All networks' },
+            ...networks.map((network) => ({ value: network.id, label: network.name, count: network.nodeCount })),
+          ]}
+        />
       </div>
+      {checkedIds.length > 0 ? (
+        <div className="selection-bar" role="toolbar" aria-label="Selected nodes">
+          <span className="selection-count">{checkedIds.length} selected</span>
+          <button
+            type="button"
+            className="button"
+            disabled={busy || checkedIds.every((node) => node.status === 'revoked')}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await api.revokeNodes(checkedIds.map((node) => node.id))
+                setChecked(new Set())
+                onChanged()
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            Revoke
+          </button>
+          <button type="button" className="button" onClick={() => setChecked(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : null}
       <section className="panel">
         {filtered.length === 0 ? (
           <EmptyView
@@ -626,7 +821,16 @@ function NodesPage({
             }
           />
         ) : (
-          <NodeTable items={filtered} onOpen={setSelected} onApprove={handleApprove} onReject={handleReject} />
+          <NodeTable
+            items={filtered}
+            onOpen={setSelected}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            checked={checked}
+            onToggle={toggle}
+            onToggleAll={allChecked ? undefined : toggleAll}
+            onClearChecked={() => setChecked(new Set())}
+          />
         )}
       </section>
       {selected ? (
@@ -976,6 +1180,7 @@ export default function App() {
         api={api}
         onChanged={refresh}
         scope={networkScope}
+        onScope={(next) => setNetworkScope(next)}
         onClearScope={() => setNetworkScope(null)}
       />
     ) : page === 'policies' ? (

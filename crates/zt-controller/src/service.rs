@@ -1407,6 +1407,49 @@ impl Controller {
     }
 
     /// Revoke a node and refuse future renewal.
+    /// Revoke several nodes at once.
+    ///
+    /// This is what the console's selection does when the operator picks
+    /// a handful of rows and presses Revoke. Nodes that do not exist,
+    /// belong to another tenant, or are already revoked are skipped, and
+    /// the count reports only what actually changed. Cross-tenant ids are
+    /// skipped rather than refused so one bad row cannot spoil the batch.
+    pub async fn revoke_nodes_bulk(
+        &self,
+        tenant_id: &str,
+        ids: &[String],
+        actor: &Actor,
+    ) -> Result<usize> {
+        let mut state = self.inner.state.write().await;
+        let mut revoked = 0;
+
+        for id in ids {
+            let Some(node) = state
+                .nodes
+                .get_mut(id)
+                .filter(|node| node.tenant_id == tenant_id && node.status != NodeStatus::Revoked)
+            else {
+                continue;
+            };
+            node.status = NodeStatus::Revoked;
+            let name = node.name.clone();
+            state.record_for_tenant(
+                Some(tenant_id),
+                "node.revoked",
+                "node",
+                id,
+                actor.display(),
+                format!("Revoked {name}"),
+            );
+            revoked += 1;
+        }
+
+        if revoked > 0 {
+            self.persist(&state).await?;
+        }
+        Ok(revoked)
+    }
+
     pub async fn revoke_node(&self, tenant_id: &str, id: &str, actor: &Actor) -> Result<Node> {
         let mut state = self.inner.state.write().await;
         let node = state

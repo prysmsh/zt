@@ -335,6 +335,94 @@ async fn rejecting_pending_revokes_junk_and_leaves_members_alone() {
 }
 
 #[tokio::test]
+async fn bulk_revoke_skips_foreign_and_already_revoked_nodes() {
+    let app = app();
+    let tenant_id = tenant(&app, "Acme").await;
+    let other_tenant = tenant(&app, "Other").await;
+    let network_id = network(&app, &tenant_id, "Production", "10.42.0.0/24").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let other_network_id = network(&app, &other_tenant, "Prod", "10.43.0.0/24").await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    async fn enroll(
+        app: &axum::Router,
+        tenant: &str,
+        network_id: &str,
+        name: &str,
+        key: u8,
+    ) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/t/{tenant}/nodes"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "network_id": network_id,
+                            "name": name,
+                            "public_key": hex::encode([key; 32])
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        json_body(response).await["node"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    let mine = enroll(&app, &tenant_id, &network_id, "mine", 30).await;
+    let mine_too = enroll(&app, &tenant_id, &network_id, "mine-too", 31).await;
+    let theirs = enroll(&app, &other_tenant, &other_network_id, "theirs", 32).await;
+
+    // One batch: two of mine (one of them twice — already revoked on the
+    // first pass), and one that belongs to someone else.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/t/{tenant_id}/nodes/bulk-revoke"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "ids": [mine, mine, theirs, "00000000-0000-0000-0000-000000000000"] })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // `mine` is revoked once; the duplicate id is skipped because the
+    // node is already revoked, `theirs` belongs to another tenant, and
+    // the unknown id does not exist.
+    assert_eq!(json_body(response).await["revoked"], 1);
+
+    // The other tenant's node is untouched.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/t/{other_tenant}/nodes/{theirs}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json_body(response).await["status"], "pending");
+    let _ = mine_too;
+}
+
+#[tokio::test]
 async fn enrollment_rejects_invalid_public_key() {
     let app = app();
     let tenant = tenant(&app, "Acme").await;

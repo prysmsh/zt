@@ -374,6 +374,18 @@ export function createFixtureClient(): ApiClient {
       }
       return rejected
     },
+    async revokeNodes(ids) {
+      await delay()
+      let revoked = 0
+      for (const id of ids) {
+        const node = controllerNodes.find((item) => item.id === id)
+        if (node && node.status !== 'revoked') {
+          node.status = 'revoked'
+          revoked += 1
+        }
+      }
+      return revoked
+    },
     async approveNode(nodeId) {
       await delay()
       const node = controllerNodes.find((item) => item.id === nodeId)
