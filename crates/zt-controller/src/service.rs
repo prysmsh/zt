@@ -29,8 +29,8 @@ use crate::model::{
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
-    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantRates, TenantStatus,
-    TenantUsage, UsageSummary,
+    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantRates,
+    TenantStatus, TenantUsage, UsageSummary,
 };
 
 /// How long a node may go without a sighting before it counts as offline.
@@ -781,9 +781,9 @@ impl Controller {
 
         // A node is charged for the fraction of the month it was there.
         let period_seconds = usage.period_end.saturating_sub(usage.period_start).max(1);
-        let node_charges_cents =
-            (u128::from(rates.node_month_cents) * u128::from(usage.node_seconds)
-                / u128::from(period_seconds)) as u64;
+        let node_charges_cents = (u128::from(rates.node_month_cents)
+            * u128::from(usage.node_seconds)
+            / u128::from(period_seconds)) as u64;
 
         // Traffic is charged by the gigabyte, rounded up.
         const GIGABYTE: u64 = 1_000_000_000;
@@ -1427,7 +1427,8 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     let era = if year >= 0 { year } else { year - 399 } / 400;
     let year_of_era = year - era * 400;
     let month = i64::from(month);
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_year =
+        (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
 
     era * 146_097 + day_of_era - 719_468

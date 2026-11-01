@@ -105,11 +105,7 @@ async fn tenant_with_node(fixture: &Fixture) -> (String, String, String) {
         .await
         .expect("enrol");
 
-    (
-        tenant.id,
-        node.id,
-        hex::encode(credential.serialize()),
-    )
+    (tenant.id, node.id, hex::encode(credential.serialize()))
 }
 
 #[tokio::test]
@@ -163,7 +159,11 @@ async fn an_invoice_is_the_usage_times_the_rates() {
         .await
         .expect("report");
 
-    let invoice = fixture.controller.invoice(&tenant, now_unix()).await.expect("invoice");
+    let invoice = fixture
+        .controller
+        .invoice(&tenant, now_unix())
+        .await
+        .expect("invoice");
 
     // Two and a half gigabytes is charged as three.
     assert_eq!(invoice.usage.total_bytes(), 2_500_000_000);
@@ -235,4 +235,3 @@ fn now_unix() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
-
