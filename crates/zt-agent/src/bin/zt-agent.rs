@@ -118,8 +118,9 @@ fn parse(arguments: &[String]) -> Result<Options> {
                 std::process::exit(0);
             }
             "--force" => options.force = true,
+            "--relay" => options.relay = true,
             "--controller" | "--tenant" | "--network" | "--name" | "--tags" | "--state"
-            | "--credential" | "--interface" | "--listen" | "--interval" | "--relay" => {
+            | "--credential" | "--interface" | "--listen" | "--interval" => {
                 index += 1;
                 let value = arguments
                     .get(index)
@@ -145,7 +146,6 @@ fn parse(arguments: &[String]) -> Result<Options> {
                             AgentError::Usage(format!("'{value}' is not a number of seconds"))
                         })?)
                     }
-                    "--relay" => options.relay = true,
                     _ => unreachable!(),
                 }
             }
@@ -423,9 +423,17 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
         .map_err(|_| AgentError::Usage(format!("'{}' is not an address", options.listen)))?;
 
     // The interface is opened by the operating system: the node needs the
-    // privilege to create it, and the agent asks for none.
-    let device = zt_tun::TunDevice::open(&options.interface, 1400)
-        .map_err(|error| AgentError::Io(format!("cannot open the interface: {error}")))?;
+    // privilege to create it, and the agent asks for none. A relay has no
+    // interface at all, so it runs without one.
+    let device: Box<dyn zt_tun::PacketDevice> = if options.relay {
+        Box::new(zt_tun::NullDevice)
+    } else {
+        Box::new(
+            zt_tun::TunDevice::open(&options.interface, 1400).map_err(|error| {
+                AgentError::Io(format!("cannot open the interface: {error}"))
+            })?,
+        )
+    };
 
     let runner_config = zt_agent::RunnerConfig {
         interface: options.interface.clone(),

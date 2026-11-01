@@ -264,6 +264,20 @@ pub trait PacketDevice {
     fn mtu(&self) -> u16;
 }
 
+impl PacketDevice for Box<dyn PacketDevice> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        (**self).read(buffer)
+    }
+
+    fn write(&mut self, packet: &[u8]) -> io::Result<usize> {
+        (**self).write(packet)
+    }
+
+    fn mtu(&self) -> u16 {
+        (**self).mtu()
+    }
+}
+
 impl PacketDevice for TunDevice {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         TunDevice::read(self, buffer)
