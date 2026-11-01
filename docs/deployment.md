@@ -230,6 +230,74 @@ zt.hardening.dev {
 }
 ```
 
+## The Verity admin console
+
+The admin console is at **`https://admin.prysm.sh/console`**, with the
+username `admin`.
+
+### Why it has its own hostname
+
+Verity runs two HTTP listeners, and the **port selects the tenant**:
+
+| Listener | Tenant | Issuer |
+|---|---|---|
+| `3001` | core (default) | `https://auth.prysm.sh/oidc` |
+| `3003` | admin | `https://admin.prysm.sh/oidc` |
+
+Each tenant runs its own OIDC provider with its own issuer URL, so the two
+must have **different origins**. If they shared one, an ID token minted by
+the admin console would be indistinguishable from one minted for a normal
+application, and the management API's CORS allowlist — which is built from
+`ADMIN_ENDPOINT` — would collide with the core tenant's origin.
+
+A separate hostname is the clean way to differ. A separate port also works,
+and the old `https://auth.prysm.sh:8443/console` address is kept working so
+that a bookmark does not break during the rollout.
+
+### The DNS record
+
+`admin.prysm.sh` is a CNAME to the same Cloudflare-proxied address as
+`auth.prysm.sh`, and `prysm.sh`'s zone is in Cloudflare's **Full** SSL
+mode, so the origin's self-signed certificate is accepted.
+
+### The origin is embedded in the resource indicators
+
+The console derives the Me API and the Cloud API from the origin it is
+served at, and asks for them as resource indicators. When the origin
+changes, the indicators have to change with it, or the sign-in fails with
+`invalid_target: resource indicator is missing, or unknown`.
+
+Both origins are registered, so a client on either one resolves:
+
+| Resource | Indicator |
+|---|---|
+| Me API (admin origin) | `https://admin.prysm.sh/me` |
+| Cloud API (admin origin) | `https://admin.prysm.sh/api` |
+| Me API (apex) | `https://prysm.sh/me` |
+| Me API (old origin) | `https://auth.prysm.sh:8443/me` |
+| Cloud API (old origin) | `https://auth.prysm.sh:8443/api` |
+| Management API (admin tenant) | `https://prysm.sh/_tenants/admin/api` |
+| Management API (default tenant) | `https://prysm.sh/_tenants/default/api` |
+
+### Verity's own settings
+
+These live in the Verity deployment, not in this repository:
+
+| Setting | Value |
+|---|---|
+| `ENDPOINT` | `https://auth.prysm.sh` |
+| `ADMIN_ENDPOINT` | `https://admin.prysm.sh` |
+| `ADMIN_PORT` | `3003` |
+
+The origin's certificate must cover the admin hostname:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout key.pem -out cert.pem \
+  -days 3650 -subj "/CN=auth.prysm.sh" \
+  -addext "subjectAltName=DNS:auth.prysm.sh,DNS:*.auth.prysm.sh,DNS:prysm.sh,DNS:*.prysm.sh,DNS:admin.prysm.sh,DNS:zt.hardening.dev"
+```
+
 ## Operating
 
 The controller's state lives in the `controller-data` volume. It holds the
