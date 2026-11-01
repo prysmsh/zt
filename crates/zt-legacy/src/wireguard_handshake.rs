@@ -278,6 +278,18 @@ pub struct Responder {
 }
 
 impl Responder {
+    /// The session keys, once an initiation has been consumed.
+    ///
+    /// The responder's chaining key is the same one the initiator ends
+    /// with, so the keys come out mirrored: what the initiator sends, the
+    /// responder receives, and the other way round. The initiator gets
+    /// these from `consume_response`; the responder has to ask.
+    pub fn session_keys(&self) -> SessionKeys {
+        crate::wireguard::derive_session_keys(&self.transcript.chain_key())
+    }
+}
+
+impl Responder {
     /// Begin a handshake.
     pub fn begin(local_static: StaticKey) -> Result<Self, HandshakeError> {
         let mut secret = [0u8; KEY_LEN];
