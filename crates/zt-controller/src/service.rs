@@ -29,8 +29,8 @@ use crate::model::{
 };
 use crate::store::{MemoryStore, Store};
 use crate::tenant::{
-    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantRates,
-    TenantStatus, TenantUsage, UsageSummary,
+    exceeded_limit, new_tenant, Deployment, Invoice, Tenant, TenantLimits, TenantStatus,
+    TenantUsage, UsageSummary,
 };
 
 /// How long a node may go without a sighting before it counts as offline.
@@ -1434,65 +1434,6 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::UsageSample;
-
-    /// A sample with the given node count.
-    fn sample(at: u64, nodes: u32) -> UsageSample {
-        UsageSample {
-            id: format!("{at}-{nodes}"),
-            tenant_id: "t".into(),
-            node_id: "n".into(),
-            recorded_at: at,
-            nodes,
-            bytes_in: 0,
-            bytes_out: 0,
-            packets: 0,
-        }
-    }
-
-    #[test]
-    fn the_node_count_is_integrated_over_time() {
-        // Two nodes from the start of the period to the first sample, and
-        // two nodes for the hour between the samples.
-        let samples = vec![sample(1_000, 2), sample(4_600, 2)];
-        let refs: Vec<&UsageSample> = samples.iter().collect();
-
-        let seconds = integrate_node_seconds(&refs, 0);
-
-        assert_eq!(seconds, 2 * 1_000 + 2 * 3_600);
-    }
-
-    #[test]
-    fn a_later_count_holds_until_the_next_sample() {
-        // One node for the first second, then four for the next.
-        let samples = vec![sample(1_000, 1), sample(2_000, 4), sample(3_000, 4)];
-        let refs: Vec<&UsageSample> = samples.iter().collect();
-
-        assert_eq!(integrate_node_seconds(&refs, 1_000), 1_000 + 4_000);
-    }
-
-    #[test]
-    fn a_calendar_month_starts_on_the_first() {
-        // 2026-11-01T00:00:00Z.
-        let november = 1_793_491_200;
-        let (start, end) = month_bounds(november);
-        assert_eq!(start, november);
-        // November has 30 days.
-        assert_eq!(end - start, 30 * 86_400);
-
-        // A time in the middle of the month is in the same period.
-        let (middle_start, _) = month_bounds(november + 15 * 86_400);
-        assert_eq!(middle_start, november);
-
-        // And the next month is a different one.
-        let (december, _) = month_bounds(november + 30 * 86_400);
-        assert_eq!(december, 1_796_083_200);
-    }
-}
-
 fn fingerprint(public_key: &[u8; 32]) -> String {
     let digest = Sha256::digest(public_key);
     digest[..6]
@@ -1527,5 +1468,64 @@ impl From<crate::error::ControllerError> for axum::http::StatusCode {
             ControllerError::InvalidRequest(_) => Self::BAD_REQUEST,
             ControllerError::Internal(_) => Self::INTERNAL_SERVER_ERROR,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::UsageSample;
+
+    /// A sample with the given node count.
+    fn sample(at: u64, nodes: u32) -> UsageSample {
+        UsageSample {
+            id: format!("{at}-{nodes}"),
+            tenant_id: "t".into(),
+            node_id: "n".into(),
+            recorded_at: at,
+            nodes,
+            bytes_in: 0,
+            bytes_out: 0,
+            packets: 0,
+        }
+    }
+
+    #[test]
+    fn the_node_count_is_integrated_over_time() {
+        // Two nodes from the start of the period to the first sample, and
+        // two nodes for the hour between the samples.
+        let samples = [sample(1_000, 2), sample(4_600, 2)];
+        let refs: Vec<&UsageSample> = samples.iter().collect();
+
+        let seconds = integrate_node_seconds(&refs, 0);
+
+        assert_eq!(seconds, 2 * 1_000 + 2 * 3_600);
+    }
+
+    #[test]
+    fn a_later_count_holds_until_the_next_sample() {
+        // One node for the first second, then four for the next.
+        let samples = [sample(1_000, 1), sample(2_000, 4), sample(3_000, 4)];
+        let refs: Vec<&UsageSample> = samples.iter().collect();
+
+        assert_eq!(integrate_node_seconds(&refs, 1_000), 1_000 + 4_000);
+    }
+
+    #[test]
+    fn a_calendar_month_starts_on_the_first() {
+        // 2026-11-01T00:00:00Z.
+        let november = 1_793_491_200;
+        let (start, end) = month_bounds(november);
+        assert_eq!(start, november);
+        // November has 30 days.
+        assert_eq!(end - start, 30 * 86_400);
+
+        // A time in the middle of the month is in the same period.
+        let (middle_start, _) = month_bounds(november + 15 * 86_400);
+        assert_eq!(middle_start, november);
+
+        // And the next month is a different one.
+        let (december, _) = month_bounds(november + 30 * 86_400);
+        assert_eq!(december, 1_796_083_200);
     }
 }

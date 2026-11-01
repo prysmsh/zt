@@ -111,7 +111,7 @@ async fn tenant_with_node(fixture: &Fixture) -> (String, String, String) {
 #[tokio::test]
 async fn what_a_node_carried_is_recorded() {
     let fixture = fixture().await;
-    let (tenant, node, credential) = tenant_with_node(&fixture).await;
+    let (tenant, node, _) = tenant_with_node(&fixture).await;
 
     fixture
         .controller
