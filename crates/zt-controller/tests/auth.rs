@@ -87,7 +87,7 @@ fn mint(keys: &TestKeys, mut claims: serde_json::Map<String, Value>) -> String {
 }
 
 /// Start a JWKS server and build an authenticated router.
-async fn authenticated_app() -> (axum::Router, TestKeys) {
+async fn authenticated_app() -> (axum::Router, TestKeys, Controller) {
     let keys = test_keys();
     let jwks = keys.jwks.clone();
 
@@ -130,7 +130,28 @@ async fn authenticated_app() -> (axum::Router, TestKeys) {
         operator_scope: "zt:operator".to_string(),
     };
 
-    (router_with_auth(controller, state), keys)
+    (router_with_auth(controller.clone(), state), keys, controller)
+}
+
+/// Create a tenant, returning its identifier.
+///
+/// The tenant is created through the service layer, because the master
+/// console's API needs the operator role and these tests are about the
+/// tenant-scoped API.
+async fn create_tenant(controller: &Controller) -> String {
+    let tenant = controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    tenant.id
 }
 
 /// A request with a bearer token.
@@ -153,7 +174,7 @@ async fn status_of(response: axum::response::Response) -> StatusCode {
 
 #[tokio::test]
 async fn the_health_check_needs_no_token() {
-    let (app, _) = authenticated_app().await;
+    let (app, _, _controller) = authenticated_app().await;
     let response = app
         .oneshot(
             Request::builder()
@@ -172,7 +193,7 @@ async fn the_health_check_needs_no_token() {
 
 #[tokio::test]
 async fn a_request_without_a_token_is_rejected() {
-    let (app, _) = authenticated_app().await;
+    let (app, _, _controller) = authenticated_app().await;
 
     for path in ["/api/v1/tenants", "/api/v1/t/acme/networks"] {
         let response = app
@@ -195,7 +216,7 @@ async fn a_request_without_a_token_is_rejected() {
 
 #[tokio::test]
 async fn a_malformed_token_is_rejected() {
-    let (app, _) = authenticated_app().await;
+    let (app, _, _controller) = authenticated_app().await;
     let response = app
         .oneshot(authorized("/api/v1/tenants", "not-a-jwt"))
         .await
@@ -209,7 +230,7 @@ async fn a_malformed_token_is_rejected() {
 
 #[tokio::test]
 async fn the_master_console_needs_the_operator_role() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     // A tenant token without the operator role.
     let token = mint(
@@ -229,7 +250,7 @@ async fn the_master_console_needs_the_operator_role() {
 
 #[tokio::test]
 async fn an_operator_token_reaches_the_master_console() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = mint(
         &keys,
@@ -249,18 +270,19 @@ async fn an_operator_token_reaches_the_master_console() {
 
 #[tokio::test]
 async fn a_tenant_token_reaches_its_own_tenant() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, controller) = authenticated_app().await;
+    let tenant_id = create_tenant(&controller).await;
 
     let token = mint(
         &keys,
         serde_json::Map::from_iter([
-            ("tenant_id".to_string(), json!("acme")),
+            ("tenant_id".to_string(), json!(tenant_id)),
             ("scope".to_string(), json!("zt:tenant")),
         ]),
     );
 
     let response = app
-        .oneshot(authorized("/api/v1/t/acme/networks", &token))
+        .oneshot(authorized(&format!("/api/v1/t/{tenant_id}/networks"), &token))
         .await
         .unwrap();
     assert_eq!(status_of(response).await, StatusCode::OK);
@@ -268,7 +290,7 @@ async fn a_tenant_token_reaches_its_own_tenant() {
 
 #[tokio::test]
 async fn a_tenant_token_cannot_reach_another_tenant() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = mint(
         &keys,
@@ -292,7 +314,7 @@ async fn a_tenant_token_cannot_reach_another_tenant() {
 
 #[tokio::test]
 async fn a_token_without_a_tenant_cannot_reach_any_tenant() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = mint(
         &keys,
@@ -308,7 +330,7 @@ async fn a_token_without_a_tenant_cannot_reach_any_tenant() {
 
 #[tokio::test]
 async fn an_operator_token_reaches_any_tenant() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     // The master console is how an operator administers a tenant other
     // than their own, so the operator role reaches every tenant.
@@ -334,7 +356,7 @@ async fn an_operator_token_reaches_any_tenant() {
 
 #[tokio::test]
 async fn a_tenant_token_without_the_tenant_scope_is_rejected() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = mint(
         &keys,
@@ -354,7 +376,7 @@ async fn a_tenant_token_without_the_tenant_scope_is_rejected() {
 
 #[tokio::test]
 async fn a_token_for_another_audience_is_rejected() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = encode(
         &header(&keys),
@@ -378,7 +400,7 @@ async fn a_token_for_another_audience_is_rejected() {
 
 #[tokio::test]
 async fn a_token_from_another_issuer_is_rejected() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = encode(
         &header(&keys),
@@ -402,7 +424,7 @@ async fn a_token_from_another_issuer_is_rejected() {
 
 #[tokio::test]
 async fn an_expired_token_is_rejected() {
-    let (app, keys) = authenticated_app().await;
+    let (app, keys, _controller) = authenticated_app().await;
 
     let token = encode(
         &header(&keys),
@@ -427,7 +449,7 @@ async fn an_expired_token_is_rejected() {
 
 #[tokio::test]
 async fn a_token_signed_by_another_key_is_rejected() {
-    let (app, _) = authenticated_app().await;
+    let (app, _, _controller) = authenticated_app().await;
 
     // A different key, whose public half is not in the JWKS.
     let other = include_str!("../tests/data/other-key.pem");

@@ -311,6 +311,34 @@ impl Controller {
         self.inner.state.read().await.tenant_usage(tenant_id)
     }
 
+    /// Check that a tenant may use the service.
+    ///
+    /// A suspended or deleted tenant is locked out. This is what makes
+    /// suspension meaningful: without it, the tenant's nodes would keep
+    /// renewing their credentials and access would never lapse.
+    pub async fn require_usable_tenant(&self, tenant_id: &str) -> Result<()> {
+        let state = self.inner.state.read().await;
+        let tenant = state
+            .tenants
+            .get(tenant_id)
+            .ok_or(ControllerError::NotFound("tenant"))?;
+
+        if !tenant.status.is_usable() {
+            let reason = match tenant.status {
+                TenantStatus::Provisioning => "not yet active",
+                TenantStatus::Active => "active",
+                TenantStatus::Suspended => "suspended",
+                TenantStatus::Deleted => "deleted",
+            };
+            return Err(ControllerError::InvalidRequest(format!(
+                "tenant {} is {reason}",
+                tenant.slug
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Check whether a tenant is within its resource limits.
     ///
     /// This is called before creating resources so that a tenant cannot
@@ -657,6 +685,10 @@ impl Controller {
         id: &str,
         actor: &Actor,
     ) -> Result<(Node, NodeCredential)> {
+        // A suspended tenant's nodes must not keep renewing, or
+        // suspension would never actually cut off access.
+        self.require_usable_tenant(tenant_id).await?;
+
         let mut state = self.inner.state.write().await;
         let node = state
             .nodes

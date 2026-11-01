@@ -190,6 +190,15 @@ pub async fn require_auth(
                     )))
                     .into_response();
                 }
+
+                // A suspended or deleted tenant is locked out of its own
+                // API. Without this, suspension would only stop new
+                // resources: the tenant's nodes would keep renewing their
+                // credentials, and access would never lapse.
+                if let Err(error) = state.controller.require_usable_tenant(path_tenant).await {
+                    return AuthRejection::from(AuthError::Forbidden(error.to_string()))
+                        .into_response();
+                }
             }
 
             next.run(request).await
