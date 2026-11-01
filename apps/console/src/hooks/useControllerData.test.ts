@@ -74,15 +74,14 @@ describe('the attention list', () => {
     expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(true)
   })
 
-  it('does not ask a revoked node for a renewal', () => {
-    // A revoked node's renewals are blocked, so asking for one is
-    // nonsense: the credential is not going to be renewed.
+  it('leaves a revoked node out of the list', () => {
+    // The operator withdrew the node, so there is nothing to do about it.
+    // Its row on the node list says so, and the activity page records it.
     const items = attentionItems(
       snapshot([node({ id: 'a', name: 'web-01', status: 'revoked' })])
     )
 
-    expect(items.some((item) => item.title === 'web-01 is revoked')).toBe(true)
-    expect(items.some((item) => item.detail.includes('needs a renewal'))).toBe(false)
+    expect(items).toHaveLength(0)
   })
 
   it('says nothing about a node that is online and in credit', () => {

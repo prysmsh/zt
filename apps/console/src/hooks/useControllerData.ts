@@ -151,15 +151,10 @@ export function attentionItems(data: ControllerSnapshot): AttentionItem[] {
   const items: AttentionItem[] = []
 
   for (const node of data.nodes) {
-    if (node.status === 'revoked') {
-      items.push({
-        id: `revoked-${node.id}`,
-        level: 'error',
-        title: `${node.name} is revoked`,
-        detail: 'Access has been withdrawn. Renewals are blocked.',
-        time: node.lastSeen,
-      })
-    } else if (node.status === 'offline') {
+    // A revoked node is not on this list: the operator withdrew it, so
+    // there is nothing to do about it. Its row on the node list says so,
+    // and the activity page records when it happened.
+    if (node.status === 'offline') {
       items.push({
         id: `offline-${node.id}`,
         level: 'error',
