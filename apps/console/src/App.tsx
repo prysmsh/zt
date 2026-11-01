@@ -223,7 +223,9 @@ function NetworkRow({
                 onClick={() => onDelete(network)}
                 onBlur={() => setConfirming(false)}
               >
-                Delete {network.nodeCount} nodes
+                {network.nodeCount === 0
+                  ? 'Delete network'
+                  : `Delete ${network.nodeCount} node${network.nodeCount === 1 ? '' : 's'}`}
               </button>
               <button type="button" className="button" onClick={() => setConfirming(false)}>
                 Cancel
