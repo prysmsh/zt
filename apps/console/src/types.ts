@@ -33,7 +33,7 @@ export interface MeshNode {
   fingerprint: string
   endpoint?: string
   /** A join request waiting for the operator's decision. */
-  awaitingApproval: boolean
+  awaitingApproval?: boolean
 }
 
 export interface Relay {
