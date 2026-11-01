@@ -692,7 +692,20 @@ mod tests {
             TYPE_FRAME,
             ipv4(Ipv4Addr::new(10, 88, 0, 2), Ipv4Addr::new(10, 88, 0, 9)),
         );
-        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
+        let count = plane
+            .forward_inbound(
+                &mut Node::from_socket(
+                    std::net::UdpSocket::bind("127.0.0.1:0").unwrap(),
+                    zt_crypto::handshake_flow::StaticIdentity::new(
+                        zt_crypto::identity::Identity::generate().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+                peer,
+                &[frame],
+            )
+            .unwrap();
         assert_eq!(count, 0, "the frame should not have been written");
         assert!(written.lock().unwrap().is_empty());
     }
@@ -717,7 +730,20 @@ mod tests {
             TYPE_FRAME,
             ipv4(Ipv4Addr::new(10, 88, 0, 3), Ipv4Addr::new(10, 88, 0, 1)),
         );
-        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
+        let count = plane
+            .forward_inbound(
+                &mut Node::from_socket(
+                    std::net::UdpSocket::bind("127.0.0.1:0").unwrap(),
+                    zt_crypto::handshake_flow::StaticIdentity::new(
+                        zt_crypto::identity::Identity::generate().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+                peer,
+                &[frame],
+            )
+            .unwrap();
         assert_eq!(count, 0, "the frame should not have been written");
         assert!(written.lock().unwrap().is_empty());
     }
@@ -736,7 +762,20 @@ mod tests {
 
         let packet = ipv4(Ipv4Addr::new(10, 88, 0, 2), Ipv4Addr::new(10, 88, 0, 1));
         let frame = Packet::new(TYPE_FRAME, packet.clone());
-        let count = plane.forward_inbound(&mut Node::from_socket(std::net::UdpSocket::bind("127.0.0.1:0").unwrap(), zt_crypto::handshake_flow::StaticIdentity::new(zt_crypto::identity::Identity::generate().unwrap()).unwrap()).unwrap(), peer, &[frame]).unwrap();
+        let count = plane
+            .forward_inbound(
+                &mut Node::from_socket(
+                    std::net::UdpSocket::bind("127.0.0.1:0").unwrap(),
+                    zt_crypto::handshake_flow::StaticIdentity::new(
+                        zt_crypto::identity::Identity::generate().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+                peer,
+                &[frame],
+            )
+            .unwrap();
         assert_eq!(count, 1);
 
         assert_eq!(*written.lock().unwrap(), vec![packet]);

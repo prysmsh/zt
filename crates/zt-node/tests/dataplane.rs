@@ -277,7 +277,9 @@ impl DirectNode {
                 .expect("forward");
         }
 
-        self.plane.forward_outbound(&mut self.node).expect("outbound");
+        self.plane
+            .forward_outbound(&mut self.node)
+            .expect("outbound");
     }
 }
 
@@ -304,7 +306,9 @@ impl RelayNode {
         };
 
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        socket.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
         let addr = socket.local_addr().unwrap();
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -313,7 +317,10 @@ impl RelayNode {
         let hosts = hosts.to_vec();
         let handle = thread::spawn(move || {
             let mut node = Node::from_socket(socket, identity).unwrap();
-            node.set_suites(KemSuite::HybridX25519MlKem768, SigSuite::HybridEd25519MlDsa65);
+            node.set_suites(
+                KemSuite::HybridX25519MlKem768,
+                SigSuite::HybridEd25519MlDsa65,
+            );
             node.set_membership(Membership::new());
             node.set_trust(ControllerTrust::new());
 
@@ -364,7 +371,10 @@ fn relayed_pair() -> (RelayNode, DirectNode, DirectNode) {
     let b_addr = b.node.local_addr();
 
     // The relay holds its own address, so it is not one of the hosts.
-    let relay = RelayNode::start(&[(a_addr, CLIENT_ADDRESS), (b_addr, SERVER_ADDRESS)], RELAY_ADDRESS);
+    let relay = RelayNode::start(
+        &[(a_addr, CLIENT_ADDRESS), (b_addr, SERVER_ADDRESS)],
+        RELAY_ADDRESS,
+    );
 
     // Both hosts know the relay, and handshake with it.
     a.plane.set_relay(relay.addr);
@@ -400,7 +410,11 @@ fn a_packet_between_two_hosts_goes_through_the_relay() {
     }
 
     let written = b.written();
-    assert_eq!(written.len(), 1, "the second host's device was not written to");
+    assert_eq!(
+        written.len(),
+        1,
+        "the second host's device was not written to"
+    );
     assert_eq!(
         written[0],
         ipv4(CLIENT_ADDRESS, SERVER_ADDRESS, payload),
