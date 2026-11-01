@@ -30,6 +30,40 @@ use crate::service::Controller;
 /// How many requests a token may make in a second.
 const RATE_LIMIT_PER_SECOND: u32 = 100;
 
+/// How many join-path requests a single source may make per second.
+///
+/// The join routes carry no token, so this is what keeps them from being
+/// flooded. Polling hosts check in every couple of seconds, and a real
+/// network rarely joins more than a few hosts at once.
+const ANONYMOUS_RATE_LIMIT: u32 = 10;
+
+/// Whether the path is one of the open join routes.
+fn is_join_path(path: &str) -> bool {
+    path == "/api/v1/join" || path.starts_with("/api/v1/join/")
+}
+
+/// The address a request appears to come from.
+///
+/// Behind Cloudflare and Caddy the socket peer is the proxy, so the
+/// forwarded headers carry the real caller. The fallback is a single
+/// shared bucket: coarse, but it still blunts a flood from callers that
+/// hide their address.
+fn client_address(headers: &HeaderMap) -> String {
+    for name in ["cf-connecting-ip", "x-real-ip"] {
+        if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
+            return value.to_string();
+        }
+    }
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 /// A fixed-window rate limiter keyed by the caller's token.
 ///
 /// In-memory on purpose: the controller is one process, and a rate limit
@@ -161,6 +195,20 @@ pub async fn require_auth(
     let path = request.uri().path().to_string();
 
     if tier_of(&path) == Tier::Public {
+        // The join routes are open by design — the security lives in the
+        // approval. Open is not unguarded: the limit here keys on the
+        // caller's address instead of a token, so a flood of fake join
+        // requests cannot crowd out real ones. Ten a second is far more
+        // than a real host or even a busy office NAT needs, and far less
+        // than a script spamming pending requests would want.
+        if is_join_path(&path) {
+            let source = client_address(&headers);
+            if !state.limiter.allows(&format!("ip:{source}"), ANONYMOUS_RATE_LIMIT) {
+                return (StatusCode::TOO_MANY_REQUESTS, Json(crate::api::ErrorBody {
+                    error: "rate limited".into(),
+                })).into_response();
+            }
+        }
         return next.run(request).await;
     }
 

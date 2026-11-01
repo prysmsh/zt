@@ -19,6 +19,13 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use zt_crypto::credential::{ControllerIdentity, NodeCredential, NONCE_LEN};
+
+/// How many pending join requests one network may hold.
+///
+/// Every pending request reserves an address from the network's range, so
+/// an unbounded queue could exhaust it. Fifty leaves room for a real
+/// batch of onboarding hosts while making a flood useless.
+const MAX_PENDING_PER_NETWORK: usize = 50;
 use zt_crypto::identity::{Address, Identity};
 
 use crate::address::{assign_address, Ipv4Range};
@@ -986,6 +993,18 @@ impl Controller {
             .cloned()
             .ok_or(ControllerError::NotFound("network"))?;
 
+        // A suspended tenant cannot grow, even by request. The operator
+        // can still read it, but nothing new gets in.
+        let tenant = state
+            .tenants
+            .get(tenant_id)
+            .ok_or(ControllerError::NotFound("tenant"))?;
+        if !tenant.status.is_usable() {
+            return Err(ControllerError::Conflict(
+                "the tenant is not accepting join requests".to_string(),
+            ));
+        }
+
         // A node that asks twice is the same host re-running join — its
         // key is its identity. The pending request is resumed rather than
         // duplicated, which is what a host whose operator was slow to
@@ -1023,6 +1042,20 @@ impl Controller {
             let resumed = node.clone();
             drop(state);
             return Ok(resumed);
+        }
+
+        // The pool of addresses in a network is finite, and every pending
+        // request holds one. A cap keeps a flood of fake requests from
+        // exhausting it and crowding out hosts an operator actually
+        // means to approve. A host already queued resumes above without
+        // holding a new address.
+        let pending = state.nodes.values().filter(|node| {
+            node.network_id == network.id && node.status == NodeStatus::Pending
+        }).count();
+        if pending >= MAX_PENDING_PER_NETWORK {
+            return Err(ControllerError::Conflict(
+                "too many pending join requests".to_string(),
+            ));
         }
 
         if state.nodes.values().any(|node| {

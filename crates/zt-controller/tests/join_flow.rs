@@ -279,6 +279,192 @@ async fn a_host_that_asks_twice_resumes_its_pending_request() {
 }
 
 #[tokio::test]
+async fn a_suspended_tenant_cannot_be_joined() {
+    let fixture = fixture().await;
+
+    let tenant = fixture
+        .controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    let network = fixture
+        .controller
+        .create_network(
+            &tenant.id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    fixture
+        .controller
+        .suspend_tenant(&tenant.id, "non-payment", &zt_controller::Actor::system())
+        .await
+        .expect("suspend");
+
+    // Knowing the slug and the network identifier is not enough: a
+    // suspended tenant accepts nothing new.
+    let response = fixture
+        .app
+        .oneshot(anonymous(
+            "/api/v1/join",
+            &json!({
+                "tenant_slug": "acme",
+                "network_id": network.id,
+                "name": "laptop-01",
+                "public_key": hex::encode([5u8; 32]),
+                "pq_public_key": hex::encode(vec![5u8; 1952]),
+            }),
+        ))
+        .await
+        .expect("join");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_flood_of_join_requests_is_refused_once_the_queue_is_full() {
+    let fixture = fixture().await;
+
+    let tenant = fixture
+        .controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    let network = fixture
+        .controller
+        .create_network(
+            &tenant.id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    // Fill the pending queue to its cap with distinct hosts.
+    for i in 0..50u8 {
+        let keys = NodeKeys {
+            ed25519: [i; 32],
+            ml_dsa: vec![i; 1952],
+        };
+        fixture
+            .controller
+            .join_node(
+                &tenant.id,
+                &network.id,
+                format!("host-{i}"),
+                keys,
+            )
+            .await
+            .expect("join fills the queue");
+    }
+
+    // The next request is refused rather than draining the address pool.
+    let keys = NodeKeys {
+        ed25519: [99u8; 32],
+        ml_dsa: vec![99u8; 1952],
+    };
+    let refused = fixture
+        .controller
+        .join_node(&tenant.id, &network.id, "overflow".into(), keys)
+        .await;
+    assert!(refused.is_err(), "the queue is full");
+
+    // An existing host can still resume: its request is already queued.
+    let resumed = fixture
+        .controller
+        .join_node(
+            &tenant.id,
+            &network.id,
+            "host-7".into(),
+            NodeKeys {
+                ed25519: [7u8; 32],
+                ml_dsa: vec![7u8; 1952],
+            },
+        )
+        .await
+        .expect("resume still works");
+    assert_eq!(resumed.name, "host-7");
+}
+
+#[tokio::test]
+async fn anonymous_join_requests_are_rate_limited() {
+    let fixture = fixture().await;
+
+    let tenant = fixture
+        .controller
+        .create_tenant(
+            "Acme".into(),
+            "acme".into(),
+            zt_controller::Deployment::Shared,
+            "team".into(),
+            Default::default(),
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("tenant");
+
+    let network = fixture
+        .controller
+        .create_network(
+            &tenant.id,
+            "Production".into(),
+            String::new(),
+            "10.42.0.0/24".into(),
+            None,
+            &zt_controller::Actor::system(),
+        )
+        .await
+        .expect("network");
+
+    // Ten requests are answered; the eleventh from the same source is not.
+    // Every request resumes the same node, so each one is legitimate on
+    // its own — the limiter is what refuses the flood.
+    let mut last = StatusCode::CREATED;
+    for _ in 0..11 {
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(anonymous(
+                "/api/v1/join",
+                &json!({
+                    "tenant_slug": "acme",
+                    "network_id": network.id,
+                    "name": "laptop-01",
+                    "public_key": hex::encode([6u8; 32]),
+                    "pq_public_key": hex::encode(vec![6u8; 1952]),
+                }),
+            ))
+            .await
+            .expect("join");
+        last = response.status();
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn a_join_for_an_unknown_network_is_refused() {
     let fixture = fixture().await;
 
