@@ -14,6 +14,7 @@ import type { ApiClient } from './api'
 import { applyTheme, initializeTheme, type Theme } from './theme'
 import { createAdminClient, type Tenant } from './admin'
 import { MasterConsole, useAdminData } from './components/AdminViews'
+import { NodeInspector } from './components/NodeInspector'
 import {
   CreateNetworkDialog,
   EnrollNodeDialog,
@@ -184,7 +185,13 @@ function NetworkRows({ items, onOpen }: { items: Network[]; onOpen?: (network: N
   )
 }
 
-function NodeTable({ items }: { items: MeshNode[] }) {
+function NodeTable({
+  items,
+  onOpen,
+}: {
+  items: MeshNode[]
+  onOpen?: (node: MeshNode) => void
+}) {
   return (
     <div className="table-wrap">
       <table>
@@ -200,9 +207,17 @@ function NodeTable({ items }: { items: MeshNode[] }) {
         </thead>
         <tbody>
           {items.map((node) => (
-            <tr key={node.id}>
+            <tr key={node.id} className={onOpen ? 'row-clickable' : undefined}>
               <td>
-                <div className="cell-main">{node.name}</div>
+                <div className="cell-main">
+                  {onOpen ? (
+                    <button type="button" className="cell-link" onClick={() => onOpen(node)}>
+                      {node.name}
+                    </button>
+                  ) : (
+                    node.name
+                  )}
+                </div>
                 <div className="cell-sub">{node.address}</div>
               </td>
               <td>{node.network}</td>
@@ -223,9 +238,11 @@ function NodeTable({ items }: { items: MeshNode[] }) {
 function Overview({
   data,
   goTo,
+  onOpenNetwork,
 }: {
   data: ControllerSnapshot
   goTo: (page: Page) => void
+  onOpenNetwork: (network: Network) => void
 }) {
   const networks = useNetworkSummaries(data)
   const attention = useAttentionItems(data)
@@ -307,7 +324,7 @@ function Overview({
               View all networks
             </button>
           </div>
-          <NetworkRows items={networks} />
+          <NetworkRows items={networks} onOpen={onOpenNetwork} />
         </section>
 
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
@@ -400,10 +417,12 @@ function NetworksPage({
   data,
   api,
   onChanged,
+  onOpenNetwork,
 }: {
   data: ControllerSnapshot
   api: ApiClient
   onChanged: () => void
+  onOpenNetwork: (network: Network) => void
 }) {
   const [creating, setCreating] = useState(false)
   const networks = useNetworkSummaries(data)
@@ -425,7 +444,7 @@ function NetworksPage({
         </div>
       </div>
       <section className="panel">
-        <NetworkRows items={networks} />
+        <NetworkRows items={networks} onOpen={onOpenNetwork} />
       </section>
       {creating ? (
         <CreateNetworkDialog
@@ -445,24 +464,33 @@ function NodesPage({
   data,
   api,
   onChanged,
+  scope,
+  onClearScope,
 }: {
   data: ControllerSnapshot
   api: ApiClient
   onChanged: () => void
+  /** The network the list is narrowed to, when one was picked. */
+  scope: string | null
+  onClearScope: () => void
 }) {
   const [query, setQuery] = useState('')
   const [enrolling, setEnrolling] = useState(false)
+  const [selected, setSelected] = useState<MeshNode | null>(null)
+  const [busy, setBusy] = useState(false)
   const [enrolled, setEnrolled] = useState<{ result: import('./api').EnrollNodeResult; networkName: string } | null>(null)
   const networks = useNetworkSummaries(data)
+  const scoped = scope ? data.nodes.filter((node) => node.network === scope) : data.nodes
   const filtered = useMemo(
     () =>
-      data.nodes.filter((node) =>
+      scoped.filter((node) =>
         `${node.name} ${node.address} ${node.network} ${node.tags.join(' ')}`
           .toLowerCase()
           .includes(query.toLowerCase()),
       ),
-    [data.nodes, query],
+    [scoped, query],
   )
+  const scopeName = scope ? networks.find((network) => network.id === scope)?.name : undefined
 
   return (
     <>
@@ -493,9 +521,16 @@ function NodesPage({
           <SlidersHorizontal size={13} />
           Status
         </button>
-        <button type="button" className="filter">
-          {networks.length} networks
-        </button>
+        {scopeName ? (
+          <button type="button" className="filter scope" onClick={onClearScope}>
+            {scopeName}
+            <X size={12} />
+          </button>
+        ) : (
+          <button type="button" className="filter">
+            {networks.length} networks
+          </button>
+        )}
       </div>
       <section className="panel">
         {filtered.length === 0 ? (
@@ -505,13 +540,44 @@ function NodesPage({
             detail={
               query
                 ? 'Try a node name, address, network, or tag.'
-                : 'Enroll a node to issue its first short-lived credential.'
+                : scopeName
+                  ? `This network has no nodes yet.`
+                  : 'Enroll a node to issue its first short-lived credential.'
             }
           />
         ) : (
-          <NodeTable items={filtered} />
+          <NodeTable items={filtered} onOpen={setSelected} />
         )}
       </section>
+      {selected ? (
+        <NodeInspector
+          node={selected}
+          networkName={
+            networks.find((network) => network.id === selected.network)?.name ?? selected.network
+          }
+          busy={busy}
+          onClose={() => setSelected(null)}
+          onRenew={async () => {
+            setBusy(true)
+            try {
+              await api.renewCredential(selected.id)
+              onChanged()
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onRevoke={async () => {
+            setBusy(true)
+            try {
+              await api.revokeNode(selected.id)
+              setSelected(null)
+              onChanged()
+            } finally {
+              setBusy(false)
+            }
+          }}
+        />
+      ) : null}
       {enrolling ? (
         <EnrollNodeDialog
           api={api}
@@ -762,6 +828,7 @@ function ActivityPage({ data }: { data: ControllerSnapshot }) {
 
 export default function App() {
   const [page, setPage] = useState<Page>('overview')
+  const [networkScope, setNetworkScope] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [theme, setTheme] = useState<Theme>(() => initializeTheme())
   const [session, setSession] = useState<Session | null>(() => loadSession())
@@ -783,6 +850,11 @@ export default function App() {
 
   const title = nav.find((item) => item.id === page)?.label ?? 'Overview'
 
+  function openNetwork(network: Network) {
+    setNetworkScope(network.id)
+    setPage('nodes')
+  }
+
   function toggleTheme() {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     applyTheme(next)
@@ -793,11 +865,17 @@ export default function App() {
     page === 'admin' ? (
       <MasterConsole api={adminApi} state={adminState} />
     ) : page === 'overview' ? (
-      <Overview data={data} goTo={setPage} />
+      <Overview data={data} goTo={setPage} onOpenNetwork={openNetwork} />
     ) : page === 'networks' ? (
-      <NetworksPage data={data} api={api} onChanged={refresh} />
+      <NetworksPage data={data} api={api} onChanged={refresh} onOpenNetwork={openNetwork} />
     ) : page === 'nodes' ? (
-      <NodesPage data={data} api={api} onChanged={refresh} />
+      <NodesPage
+        data={data}
+        api={api}
+        onChanged={refresh}
+        scope={networkScope}
+        onClearScope={() => setNetworkScope(null)}
+      />
     ) : page === 'policies' ? (
       <PoliciesPage data={data} />
     ) : page === 'relays' ? (
