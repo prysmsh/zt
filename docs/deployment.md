@@ -676,6 +676,13 @@ $ zt-agent adopt --credential <credential> --controller https://zt.hardening.dev
     --tenant <tenant-id> --state ~/zt-node/node.json
 ```
 
+The credential is short-lived, and the agent renews it on its own: every
+check-in renews it when three quarters of its life has elapsed. There is
+nothing for an operator to do, and nothing to schedule. A node that is
+renewing is healthy; the console's attention list only names a
+credential once it is close enough to expiry that a failed renewal would
+take the node off the mesh.
+
 ## What this does not cover
 
 - **The master console has no per-action audit of who did what.** The

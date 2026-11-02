@@ -11,6 +11,7 @@
 //! zt-agent identity
 //! ```
 
+use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -56,19 +57,33 @@ owner-only permissions.
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
 
+    // The long-running modes print on every tick, and they usually run
+    // under a service manager, where the output is a pipe rather than a
+    // terminal. Rust's standard output is block-buffered in that case, so
+    // a message would sit in the buffer until it filled — which for a
+    // line every thirty seconds can be a long time. The line buffer
+    // flushes each line as it is written, so the log says what is
+    // happening while it is happening.
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    let _ = writeln!(out, "zt-agent {} starting", env!("CARGO_PKG_VERSION"));
+
     match run(&arguments) {
         Ok(output) => {
             if !output.is_empty() {
-                println!("{output}");
+                let _ = writeln!(out, "{output}");
             }
+            let _ = out.flush();
             ExitCode::SUCCESS
         }
         Err(AgentError::Usage(message)) => {
+            let _ = out.flush();
             eprintln!("error: {message}\n");
             eprintln!("{USAGE}");
             ExitCode::FAILURE
         }
         Err(error) => {
+            let _ = out.flush();
             eprintln!("error: {error}");
             ExitCode::FAILURE
         }
@@ -436,21 +451,21 @@ fn checkin(options: Options, config: AgentConfig) -> Result<String> {
             // the node falls off, and the console says so for as long as
             // the operator does not notice.
             if let Some(renewal) = agent.maintain(now_unix())? {
-                println!(
+                say(&format!(
                     "renewed the credential, it now expires at {}",
                     timestamp(renewal.credential_not_after)
-                );
+                ));
             }
 
             report(agent.client())?;
 
             let topology = agent.client().topology()?;
-            println!(
+            say(&format!(
                 "checked in as {} in {} ({} peers)",
                 topology.address,
                 topology.cidr,
                 topology.peers.len()
-            );
+            ));
 
             std::thread::sleep(Duration::from_secs(seconds.max(1)));
         },
@@ -521,10 +536,10 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
             let renewed = agent.maintain(now_unix())?;
             match renewed {
                 Some(renewal) => {
-                    println!(
+                    say(&format!(
                         "renewed the credential, it now expires at {}",
                         timestamp(renewal.credential_not_after)
-                    );
+                    ));
                     Ok(Some(agent.membership()?))
                 }
                 None => Ok(None),
@@ -541,6 +556,21 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
     runner.run()?;
 
     Ok(String::new())
+}
+
+/// Write a line to the standard output and flush it.
+///
+/// The long-running modes print on every tick, and they usually run under
+/// a service manager, where the output is a pipe. Rust's standard output
+/// is block-buffered in that case, so a message would sit in the buffer
+/// until it filled — which for a line every thirty seconds can be a long
+/// time. Flushing each line means the log says what is happening while
+/// it is happening.
+fn say(message: &str) {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    let _ = writeln!(out, "{message}");
+    let _ = out.flush();
 }
 
 /// The current Unix time in seconds.
