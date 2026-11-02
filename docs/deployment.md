@@ -195,6 +195,173 @@ curl -s https://prysm.sh/oidc/.well-known/openid-configuration | jq .scopes_supp
 #   "roles": ["zt:operator"]
 ```
 
+## Signing in to the forge
+
+The forge at **`https://git.prysm.sh`** is a Forgejo instance, and it takes
+the same identity from the same provider: a "Sign in with Verity" button on
+its login page, backed by an OpenID Connect login source.
+
+### The application
+
+Forgejo is a confidential client: it holds a secret and exchanges the
+authorization code with it, so it registers as a "Traditional" application
+rather than a SPA. The client identifier is the application's id, which
+Forgejo uses as its client key.
+
+The redirect URI is not a choice. Forgejo builds its callback URL from the
+name of the login source:
+
+```
+<ROOT_URL>/user/oauth2/<source name>/callback
+```
+
+so the source has to be named `Verity` for the registered URI to be the one
+below. The scopes are what the identity is made of: `openid` makes the
+provider issue an ID token, `profile` carries `preferred_username`, `email`
+carries the address, and `roles` carries the Verity roles that map onto
+Forgejo's administrator group.
+
+`deploy/verity/forgejo-app.sql` writes the row. It is written directly
+because the Management API path is broken on this instance — the quota guard
+calls the admin tenant's Cloud API with a client that no longer
+authenticates there, and the request fails with a 500.
+
+The script generates the client secret rather than carrying one, and its
+last query prints it. That value is what Forgejo is given below, and it is
+the only one of the two secrets that leaves the machine: the provider keeps
+an internal one of its own, behind the `#internal:` prefix.
+
+### The login source
+
+The source itself lives in Forgejo's database, added with its own CLI. The
+secret is the one the script printed:
+
+```bash
+docker exec -u git gitea gitea admin auth add-oauth \
+  --name Verity \
+  --provider openidConnect \
+  --key forgejoapp00000000001 \
+  --secret '<the client secret>' \
+  --auto-discover-url https://prysm.sh/oidc/.well-known/openid-configuration \
+  --scopes openid --scopes profile --scopes email --scopes roles \
+  --group-claim-name roles \
+  --admin-group zt:operator \
+  --skip-local-2fa
+```
+
+`--provider openidConnect` is the provider name the string has to be spelled
+exactly; it is not a display name. `--auto-discover-url` points the source
+at the provider's discovery document, so the endpoints are not configured by
+hand.
+
+`--group-claim-name roles` and `--admin-group zt:operator` are what make the
+forge's administrator a Verity operator rather than a name on a list. The
+`roles` claim is an array, and Forgejo reads the group out of it.
+
+`--skip-local-2fa` is there because the forge account has no second factor
+of its own: the provider is already the thing that proves who the user is.
+
+### Registration stays closed
+
+The forge has `DISABLE_REGISTRATION = true`, and it stays that way. Nothing
+here turns it off.
+
+That matters, because Forgejo's OpenID Connect login source would otherwise
+create an account for anyone who authenticates against the provider. With
+registration disabled, Forgejo has no account to give the returning user, and
+its answer is the "Link to an existing account" page — which is not a
+failure, it is the page where the user proves they own an existing forge
+account by signing in to it with its password.
+
+The result is that the forge's accounts are still made by its administrator,
+and the provider only says *who* is signing in.
+
+`ALLOW_ONLY_INTERNAL_REGISTRATION = true` is what closes the door on the
+provider's side, and it is set for the same reason. Forgejo reads two
+different flags here, and only the second one gates the OpenID Connect
+source:
+
+| Flag | What it gates |
+|---|---|
+| `DISABLE_REGISTRATION` | the forge's own sign-up form |
+| `ALLOW_ONLY_INTERNAL_REGISTRATION` | account creation from an external provider |
+
+The first one alone leaves the OpenID Connect source free to create an
+account for any user the provider authenticates. The second one is the one
+that has to be set for the forge's accounts to stay the administrator's to
+make. It also takes the "Register new account" tab off the linking page, so
+a user who arrives without a link is offered the one thing that works.
+
+### Linking the accounts
+
+The link is one row in Forgejo's `external_login_user` table, and it is
+what makes the second sign-in a single click:
+
+```
+external_id      zt-console-user-001   -- the provider's subject
+user_id          1                     -- the forge's administrator
+login_source_id  1                     -- the "Verity" source
+provider         Verity
+email            zt-console@prysm.sh
+```
+
+The row is what Forgejo itself writes when the link is made through that
+page, so making it by hand and making it through the page end in the same
+place. Once it is there, signing in with Verity lands directly in the forge
+account, with no password prompt and no link page.
+
+The subject is the provider's `sub` claim, which is the user's id in the
+tenant. It is stable, and it is what the provider puts in the ID token:
+
+```bash
+# The subject the provider issued.
+docker exec verity-deploy-postgres-1 psql -U postgres -d logto \
+  -c "SELECT id, tenant_id, username FROM users;"
+
+# The link in the forge.
+python3 -c "
+import sqlite3
+db = sqlite3.connect('/home/ubuntu/gitea-deploy/data/gitea/gitea.db')
+for row in db.execute('SELECT external_id, user_id, login_source_id FROM external_login_user'):
+    print(row)
+"
+```
+
+### Verifying
+
+```bash
+# The button must be on the login page.
+curl -s https://git.prysm.sh/user/login | grep -o 'user/oauth2/[A-Za-z]*'
+
+# The source must be active.
+docker exec -u git gitea gitea admin auth list
+```
+
+Signing in with Verity as a user holding the `zt:operator` role must land in
+the forge as an administrator, and the forge's own administrator flag is
+re-derived from the group claim on every sign-in.
+
+### The operator's password
+
+The provider stores the console operator's password as an Argon2i hash, so
+it cannot be read back. It was reset on 2026-11-02, and the replacement is
+in `~/verity-deploy/.console` on the host, next to the other credentials:
+
+```bash
+# The password must work.
+TOKEN=$(curl -s -X POST https://prysm.sh/oidc/token \
+  -d 'grant_type=client_credentials&client_id=m-default&client_secret=…&scope=all&resource=https://prysm.sh/api' \
+  | jq -r .access_token)
+
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://prysm.sh/api/users/zt-console-user-001/password/verify \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"…"}'
+```
+
+A `204` means the password is the right one.
+
 ## The callback route
 
 The console reads the authorization code from the URL's query string, so
