@@ -1,0 +1,65 @@
+{
+ "source": "Captured from a live ZeroTier 1.16.2 client (zerotier-one) on the local network, via tcpdump on the UDP transport.",
+ "packets": [
+  {
+   "src": "192.168.190.247",
+   "dst": "84.17.53.155",
+   "dport": 9993,
+   "payload": "91861b9953d806a1cafe04eba9a4711b461708e954d08aff57f5833aac06cc4b2a"
+  },
+  {
+   "src": "192.168.190.247",
+   "dst": "84.17.53.155",
+   "dport": 9993,
+   "payload": "0b33ccce355ab774cafe04eba9a4711b4617083b4217a3cd6f861e7ef735bcee3b"
+  },
+  {
+   "src": "192.168.190.247",
+   "dst": "84.17.53.155",
+   "dport": 9993,
+   "payload": "f2093ee669420e5bcafe04eba9a4711b46170828f8dcd67fe089aa6bf6c4e11642"
+  },
+  {
+   "src": "192.168.190.247",
+   "dst": "84.17.53.155",
+   "dport": 9993,
+   "payload": "8c8bdae5b132036ecafe04eba9a4711b4617080c00fb76c6af6a40db2e7e6ab9d6"
+  },
+  {
+   "src": "192.168.190.237",
+   "dst": "192.168.190.247",
+   "dport": 9993,
+   "payload": "1bb8d2d96cf28b11a4711b46172343a5dab7188f623638d9e57ecddf"
+  },
+  {
+   "src": "192.168.190.237",
+   "dst": "192.168.190.247",
+   "dport": 9993,
+   "payload": "0e162aec5e382469a4711b46172343a5dab71835ddeac9251125c3b3"
+  },
+  {
+   "src": "192.168.190.247",
+   "dst": "192.168.190.237",
+   "dport": 9993,
+   "payload": "38cebc439fd3ba882343a5dab7a4711b4617187754dda197eef6717ff8e837fac2a7339fee"
+  },
+  {
+   "src": "192.168.190.247",
+   "dst": "192.168.190.237",
+   "dport": 20382,
+   "payload": "04deb8fdd96f859e2343a5dab7a4711b46171830f68d37e4c48b1d5df978c077005723bef2"
+  },
+  {
+   "src": "192.168.190.109",
+   "dst": "192.168.190.247",
+   "dport": 9993,
+   "payload": "cff2eafe2a333938a4711b4617ca7c4ebb5a1886516d0a87693244de"
+  },
+  {
+   "src": "192.168.190.109",
+   "dst": "192.168.190.247",
+   "dport": 48690,
+   "payload": "e1c43264f909d85aa4711b4617ca7c4ebb5a18bd9f5f19c4396711cc"
+  }
+ ]
+}

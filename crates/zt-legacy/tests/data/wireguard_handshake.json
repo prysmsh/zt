@@ -1,11 +1,11 @@
 {
-  "accepted_response": "020000009d241caa30f6075ceed999d4adefb357e099c1d99f555cef6c2f51895d2014e610da83d13e493d22255aaa978f5c20e81c6e543e684d80b896467896c9eec9a5f12ef15175c6f7b400000000000000000000000000000000",
+  "accepted_response": "0200000029483a077fe1630ba2b223bcda2283c4453c2002a761394ae2325b9bbf1c76207df6a9c0ad893b3066ace76956476f5489fccf9568a7235880e4328f1379c3bc479db5a34d4329a800000000000000000000000000000000",
   "description": "A handshake initiation captured from the Linux kernel's WireGuard implementation, and the response it accepted.",
-  "implementation_ephemeral_secret": "fb9c73722aee044f505e59fdb5e6f33d22f3b7645cdaeb7b228a4da97d0198e5",
-  "implementation_index": 2853971101,
-  "implementation_public_key": "+FMr0fBIHtll6pJGkQMApN+MmyURUtAXWr7mpym40X4=",
-  "implementation_static_secret": "de93d97ab6713de3193a7f2075b778e7089185188d7ed778762c877c0f7ccc89",
-  "initiation": "0100000030f6075cb0a532991fcc8459d331304739f28fc026dca6960f62f16aa568a09ddaeee70a620f3d6b0cc778eb3174e2de7d79243e0a1883eb04d7e1e375f0e1c85807c4a5aa70b125bb41261ef2cb57b45aad9076a9a92c63b672f2c9363e42d134971b5a9992caecff6670e511315c3c45c9a1e7da71439c8b06358af4bae0ad00000000000000000000000000000000",
-  "kernel_listen_port": 52980,
-  "kernel_public_key": "EsM95p2i8Ou3/P9Xkx0Zp0Vikfl7tCKYxGrQtnH5GE8="
+  "implementation_ephemeral_secret": "840d515400b58a31cbe099cf362d567957981b433bdefb29ceec9046cfb30b7c",
+  "implementation_index": 121260073,
+  "implementation_public_key": "mKwmovyJqFtjGlGp4pE7eoq2WKw5S9W+OWxM7y7MI34=",
+  "implementation_static_secret": "c7cea1cdc28f5ee3265593b4a028286c6efaaea4902204549545cae5c6823a47",
+  "initiation": "010000007fe1630b84817d61a259ce1a48922f3958fbf38ac585d7e14aa1cb42bc1351b29cd7ea1dd0445a8049bf5728dfd24d3da9a1f33278ea3ccfdcdaaf8ca34b6722c5efe67ec9468ef91f52b7503e6e6491867ee5d94b1d6b59d3b539fa7210363ebeaeeb7af33c85552846e1851fcc030ca33c88bde98c8cefb8fb5fac167e4e2200000000000000000000000000000000",
+  "kernel_listen_port": 45396,
+  "kernel_public_key": "rpROxEqDoR4gfAp7tbTdTMglDO4lctFpK6GRj/KPoTU="
 }

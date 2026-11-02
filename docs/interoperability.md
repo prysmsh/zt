@@ -338,6 +338,25 @@ cargo test -p zt-legacy
 The golden vectors cover identity derivation, signing, and key agreement.
 The packet-level and credential-level vectors still need to be generated.
 
+A third check uses the real client rather than its code. A running
+`zerotier-one` puts packets on the wire; capturing them and parsing them
+with this implementation proves the dialect reads what ZeroTier actually
+sends:
+
+```bash
+# Capture what a live client sends.
+sudo tcpdump -i any -c 10 -w zt.pcap 'udp and (port 9993 or port 19993)'
+
+# The parser is checked against the capture.
+cargo test -p zt-legacy --test zerotier_packets
+```
+
+The capture in `crates/zt-legacy/tests/data/zerotier_packets.json` was
+taken from a ZeroTier 1.16.2 client on the local network. Every packet in
+it is encrypted — ZeroTier encrypts control packets too — so the check is
+that the cipher suite is read out of the header exactly as ZeroTier reads
+it, and that no verb is ever read out of ciphertext.
+
 ### Tailscale
 
 Tailscale's protocol is open source, so the equivalent approach is:
@@ -367,8 +386,10 @@ Tailscale's protocol is open source, so the equivalent approach is:
 | ZeroTier dialect: 96-byte custom signature | ✅ implemented, verified against the oracle |
 | ZeroTier dialect: SHA-512 counter-mode KDF | ✅ implemented, verified against the oracle |
 | ZeroTier dialect: Ed25519 seed expansion | ✅ implemented (ZeroTier hashes the seed) |
-| ZeroTier dialect: packet framing and 20 verbs | not started |
-| ZeroTier dialect: COM and COO credentials | not started |
+| ZeroTier dialect: packet framing and 20 verbs | ✅ implemented |
+| ZeroTier dialect: COM and COO credentials | ✅ implemented, verified against the oracle |
+| ZeroTier dialect: session manager (key agreement, packet exchange) | not started — the packets are built and parsed, but nothing runs a session |
+| ZeroTier dialect: AES-GMAC-SIV, the cipher ZeroTier 1.16 uses on the wire | not started — only Salsa20/Poly1305 is implemented |
 | Unified frame layer | designed, not implemented |
 | Federated membership in the controller | designed, not implemented |
 | Shared relay fleet | relay infrastructure planned; capability model not implemented |
