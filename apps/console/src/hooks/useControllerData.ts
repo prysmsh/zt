@@ -127,18 +127,56 @@ export interface AttentionItem {
 }
 
 /**
+ * The current time, in seconds.
+ *
+ * The credential timestamps are Unix seconds, so the rules that work on
+ * them work on this.
+ */
+function currentTime(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
+/**
+ * The fraction of a credential's life after which the agent renews it.
+ *
+ * The agent renews a credential once three quarters of its life has
+ * elapsed. The console must agree: a warning that fires before the agent
+ * has renewed is a warning that is always on, because the agent renews
+ * on its own schedule and the console cannot make it renew sooner.
+ *
+ * A credential is only worth flagging when it is close enough to expiry
+ * that a failed renewal would take the node off the mesh, which is what
+ * the agent leaves behind: the last quarter of the life.
+ */
+const RENEW_AFTER_FRACTION = 0.75
+
+/**
  * Whether a credential is close enough to expiring to be worth flagging.
  *
- * The console renders the remaining lifetime as `Expired`, `Expires in
- * 42m`, `Expires in 3h` or `Expires in 12d`. Only the first three are
- * close enough to matter.
+ * A node that is not renewing keeps the same credential until it
+ * expires, so the warning is raised when the credential is inside the
+ * window in which the agent would have renewed it.
+ *
+ * The time is passed in rather than read from the clock, so the rule can
+ * be exercised at a known moment.
  */
-function needsAttention(credentialExpires: string): boolean {
-  if (credentialExpires === 'Expired') {
+function needsAttention(node: MeshNode, now: number): boolean {
+  if (node.credentialNotAfter === 0) {
+    // A node that has never been issued a credential.
+    return false
+  }
+
+  if (now >= node.credentialNotAfter) {
     return true
   }
 
-  return /^Expires in (\d+[mh])/.test(credentialExpires)
+  const total = node.credentialNotAfter - node.credentialIssuedAt
+  if (total <= 0) {
+    return true
+  }
+
+  const age = now - node.credentialIssuedAt
+  return age / total >= RENEW_AFTER_FRACTION
 }
 
 /**
@@ -147,7 +185,7 @@ function needsAttention(credentialExpires: string): boolean {
  * This is the substance of the attention list, kept apart from the hook so
  * it can be reasoned about on its own.
  */
-export function attentionItems(data: ControllerSnapshot): AttentionItem[] {
+export function attentionItems(data: ControllerSnapshot, now = currentTime()): AttentionItem[] {
   const items: AttentionItem[] = []
 
   for (const node of data.nodes) {
@@ -177,10 +215,11 @@ export function attentionItems(data: ControllerSnapshot): AttentionItem[] {
     // A revoked node's renewals are blocked, so its credential is not
     // going to be renewed. It is already reported above.
     //
-    // A credential that is days from expiring is not worth an operator's
-    // attention: the node renews it long before then. One that is hours
-    // away, or gone, is.
-    if (node.status !== 'revoked' && needsAttention(node.credentialExpires)) {
+    // A credential is only worth an operator's attention once it is close
+    // enough to expiry that a failed renewal would take the node off the
+    // mesh. The agent renews it before that point on its own, so a
+    // credential that is merely old is not a problem.
+    if (node.status !== 'revoked' && needsAttention(node, now)) {
       items.push({
         id: `credential-${node.id}`,
         level: 'warning',

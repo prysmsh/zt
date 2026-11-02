@@ -77,6 +77,16 @@ describe('mapNode', () => {
     expect(mapped.credentialExpires).toBe('Expired')
   })
 
+  it('carries the credential timestamps, so the console can reason on them', () => {
+    const mapped = mapNode({
+      ...node,
+      credential_issued_at: 1_700_000_000,
+      credential_not_after: 1_700_086_400,
+    })
+    expect(mapped.credentialIssuedAt).toBe(1_700_000_000)
+    expect(mapped.credentialNotAfter).toBe(1_700_086_400)
+  })
+
   it('preserves the revoked status', () => {
     const mapped = mapNode({ ...node, status: 'revoked' })
     expect(mapped.status).toBe('revoked')

@@ -241,6 +241,50 @@ async fn an_agent_renews_an_expiring_credential() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn maintaining_an_agent_renews_a_credential_that_is_due() {
+    // This is the tick a long-running agent makes. It has to renew the
+    // credential, because a credential is short-lived and a node that
+    // does not renew it falls off the mesh when it expires.
+    let controller = TestController::start().await;
+    let network_id = seed(&controller).await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let state_path = dir.path().join("node.json");
+
+    let mut config = config(&controller, state_path);
+    config.network_id = network_id;
+
+    let mut agent = Agent::open(config).expect("open");
+    agent.enroll("web-01", &[]).expect("enroll");
+
+    let original = agent.state().credential.clone();
+
+    // A fresh credential is not due, so a tick does nothing.
+    let now = current_unix();
+    assert!(agent
+        .maintain(now)
+        .expect("maintain")
+        .is_none());
+    assert_eq!(agent.state().credential, original);
+
+    // A credential that is spent is due. The tick renews it, and the
+    // state, the client's credential, and the membership all follow.
+    let expired = current_unix() + 86_400;
+    let renewed = agent
+        .maintain(expired)
+        .expect("maintain")
+        .expect("the credential was due");
+
+    assert_ne!(renewed.credential, original);
+    assert_eq!(agent.state().credential, renewed.credential);
+    assert_eq!(agent.state().credential_not_after, renewed.credential_not_after);
+
+    // The client presents the new credential, not the old one.
+    let membership = agent.membership().expect("membership");
+    assert_eq!(membership.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_agent_rejects_a_credential_from_an_untrusted_controller() {
     let controller = TestController::start().await;
     let network_id = seed(&controller).await;

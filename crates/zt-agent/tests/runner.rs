@@ -237,6 +237,9 @@ fn runner(agent: &Agent, queue: Queue) -> Runner {
         agent.membership().expect("membership"),
         agent.trust().expect("trust"),
         agent.state().pq_public_key_hex().expect("post-quantum key"),
+        // The runner asks the agent to renew. The test never lets the
+        // credential fall due, so there is nothing to renew.
+        Box::new(|| Ok(None)),
         RunnerConfig {
             listen,
             ..Default::default()

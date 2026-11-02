@@ -29,6 +29,10 @@ export interface MeshNode {
   directPeers: number
   relayedPeers: number
   credentialExpires: string
+  /** When the credential was issued, as a Unix timestamp. */
+  credentialIssuedAt: number
+  /** When the credential expires, as a Unix timestamp. */
+  credentialNotAfter: number
   tags: string[]
   fingerprint: string
   /** The UDP endpoint the node last reported, as `ip:port`. */

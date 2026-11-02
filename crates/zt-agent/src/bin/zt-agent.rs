@@ -384,7 +384,8 @@ fn identity(options: Options, config: AgentConfig) -> Result<String> {
     let public_key = state.public_key_hex()?;
 
     Ok(format!(
-        "public key: {public_key}\nstate:      {}",
+        "public key: {public_key}\npq key:    {}\nstate:      {}",
+        state.pq_public_key_hex()?,
         options.state.display()
     ))
 }
@@ -400,7 +401,7 @@ fn identity(options: Options, config: AgentConfig) -> Result<String> {
 /// for the topology. With `--interval` it keeps doing so, which is what a
 /// node that only carries the control plane runs.
 fn checkin(options: Options, config: AgentConfig) -> Result<String> {
-    let agent = Agent::open(config)?;
+    let mut agent = Agent::open(config)?;
 
     let listen: std::net::SocketAddr = options
         .listen
@@ -430,9 +431,20 @@ fn checkin(options: Options, config: AgentConfig) -> Result<String> {
 
     match options.interval {
         Some(seconds) => loop {
-            report(&client)?;
+            // The credential is short-lived. Renewing it here is what keeps
+            // the node on the mesh: without it the credential expires and
+            // the node falls off, and the console says so for as long as
+            // the operator does not notice.
+            if let Some(renewal) = agent.maintain(now_unix())? {
+                println!(
+                    "renewed the credential, it now expires at {}",
+                    timestamp(renewal.credential_not_after)
+                );
+            }
 
-            let topology = client.topology()?;
+            report(agent.client())?;
+
+            let topology = agent.client().topology()?;
             println!(
                 "checked in as {} in {} ({} peers)",
                 topology.address,
@@ -463,7 +475,7 @@ fn checkin(options: Options, config: AgentConfig) -> Result<String> {
 /// reach it, asks for the topology, and forwards packets between the
 /// interface and the peers until it is stopped.
 fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
-    let agent = Agent::open(config)?;
+    let mut agent = Agent::open(config)?;
 
     let listen: std::net::SocketAddr = options
         .listen
@@ -491,20 +503,40 @@ fn run_data_plane(options: Options, config: AgentConfig) -> Result<String> {
         ..Default::default()
     };
 
+    // The post-quantum key is read before the agent is moved into the
+    // renewal closure, because the runner needs it too.
+    let pq_public_key = agent.state().pq_public_key_hex()?;
+
     let mut runner = zt_agent::Runner::new(
         Box::new(device),
         agent.client().clone(),
         agent.state().static_identity()?,
         agent.membership()?,
         agent.trust()?,
-        agent.state().pq_public_key_hex()?,
+        pq_public_key.clone(),
+        // The runner asks the agent to renew, because the agent owns the
+        // credential. The agent is moved into the closure, so it is the
+        // only owner of it from here on.
+        Box::new(move || {
+            let renewed = agent.maintain(now_unix())?;
+            match renewed {
+                Some(renewal) => {
+                    println!(
+                        "renewed the credential, it now expires at {}",
+                        timestamp(renewal.credential_not_after)
+                    );
+                    Ok(Some(agent.membership()?))
+                }
+                None => Ok(None),
+            }
+        }),
         runner_config,
     )?;
 
     // The controller needs to know where the peers can reach this node,
     // and which post-quantum key they check its signature with. The runner
     // reports it on every refresh, so the node stays online.
-    runner.report_presence(&agent.state().pq_public_key_hex()?)?;
+    runner.report_presence(&pq_public_key)?;
 
     runner.run()?;
 

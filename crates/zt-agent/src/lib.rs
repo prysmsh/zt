@@ -291,6 +291,22 @@ impl Agent {
         Ok(Some(response))
     }
 
+    /// Keep the node's credential current.
+    ///
+    /// This is what a long-running agent calls on every tick. A credential
+    /// is short-lived, and a node that does not renew it falls off the
+    /// mesh when it expires, so the renewal has to happen on a timer
+    /// rather than when an operator remembers to ask for it.
+    ///
+    /// Returns the renewal when one happened. Everything derived from the
+    /// credential — the client's credential, and the membership the node
+    /// presents to its peers — is refreshed with it, because a node that
+    /// kept the old membership after renewing would be presenting a
+    /// credential the controller has already replaced.
+    pub fn maintain(&mut self, now_unix: u64) -> Result<Option<EnrollResponse>> {
+        self.renew_if_due(now_unix)
+    }
+
     /// Whether the credential should be renewed now.
     pub fn needs_renewal(&self, now_unix: u64) -> bool {
         if self.state.node_id.is_empty() {
@@ -300,21 +316,24 @@ impl Agent {
             return true;
         }
 
-        let lifetime = self.state.credential_ttl(now_unix);
-        let _ = lifetime;
-
         // The credential is renewed once most of its lifetime has elapsed.
-        // The threshold is relative to the issued time, which is not stored
-        // separately, so the age is estimated from the remaining time.
-        let issued_at = self
-            .state
-            .credential_not_after
-            .saturating_sub(self.config_credential_lifetime());
-        let age = now_unix.saturating_sub(issued_at);
-        let total = self.config_credential_lifetime();
+        // The age comes from the credential's own issue time, which is
+        // what the controller stamped on it. Reconstructing the age from
+        // the remaining time works only while the lifetime never changes,
+        // and it is wrong the moment the controller issues a credential
+        // with a different TTL.
+        let Ok(credential) = self.state.credential() else {
+            // A credential that cannot be read is a credential that cannot
+            // be trusted. Renew it and get a readable one.
+            return true;
+        };
+
+        let total = credential.ttl_secs() as u64;
         if total == 0 {
             return true;
         }
+
+        let age = now_unix.saturating_sub(credential.issued_at());
         age as f64 / total as f64 >= self.config.renew_after_fraction
     }
 
@@ -455,6 +474,60 @@ mod tests {
         let membership = agent.membership().expect("membership");
         assert_eq!(membership.len(), 1);
         assert_eq!(membership.for_network(42).unwrap().network_id, 42);
+    }
+
+    #[test]
+    fn the_renewal_age_comes_from_the_credentials_own_issue_time() {
+        // The age of a credential is measured from when the controller
+        // issued it, which the credential carries. Reconstructing it from
+        // the remaining time works only while the lifetime never changes:
+        // a node whose credential was issued with a shorter TTL than the
+        // one it holds would be judged by the wrong age.
+        let controller = ControllerIdentity::new(Identity::generate().unwrap());
+        let node = Identity::generate().unwrap();
+        let now = 1_700_000_000u64;
+
+        // A credential with an hour of life, issued three quarters of an
+        // hour ago: it is nearly spent, and renewal is due.
+        let credential = controller.issue(
+            42,
+            node.address_for_network(42),
+            &node.public_key_bytes(),
+            now - 2_700,
+            3_600,
+            &[7u8; 16],
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("node.json");
+        let mut state = NodeState::load_or_create(
+            &path,
+            Some(controller.public_key()),
+            Some(*controller.controller_id()),
+        )
+        .expect("create");
+        state.set_credential(
+            "node-1",
+            "net-1",
+            &hex::encode(credential.serialize()),
+            credential.not_after(),
+        );
+
+        let config = AgentConfig {
+            state_path: path,
+            ..Default::default()
+        };
+        let agent = Agent {
+            config,
+            client: ControllerClient::new("http://127.0.0.1:8080", "acme"),
+            state,
+        };
+
+        // The credential was issued 2_700 seconds ago and lives 3_600
+        // seconds, so the renewal comes due at three quarters of its
+        // life: one second before that it is not yet due.
+        assert!(!agent.needs_renewal(now - 1));
+        assert!(agent.needs_renewal(now));
     }
 
     #[test]

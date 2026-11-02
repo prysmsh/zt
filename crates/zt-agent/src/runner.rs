@@ -91,6 +91,12 @@ pub struct Runner {
     /// The controller hands it out in the topology, and a peer needs it to
     /// complete a handshake.
     pq_public_key: String,
+    /// Renews the credential and returns the membership it implies.
+    ///
+    /// The credential is short-lived, so a node that does not renew it
+    /// falls off the mesh. The agent owns the credential, so the runner
+    /// asks it rather than keeping a second copy that could drift.
+    renew: Box<dyn FnMut() -> Result<Option<Membership>> + Send>,
 }
 
 impl Runner {
@@ -105,6 +111,7 @@ impl Runner {
         membership: Membership,
         trust: ControllerTrust,
         pq_public_key: String,
+        renew: Box<dyn FnMut() -> Result<Option<Membership>> + Send>,
         config: RunnerConfig,
     ) -> Result<Self> {
         let socket = std::net::UdpSocket::bind(config.listen)
@@ -135,6 +142,7 @@ impl Runner {
             peers: BTreeMap::new(),
             last_refresh: None,
             pq_public_key,
+            renew,
         })
     }
 
@@ -309,6 +317,15 @@ impl Runner {
             self.poll()?;
 
             let now = Instant::now();
+
+            // The credential is short-lived. Renew it before it is due to
+            // expire, and put the new one in the membership the node
+            // presents to its peers: a node that renewed but kept the old
+            // membership would be offering a credential the controller has
+            // already replaced.
+            if let Some(membership) = (self.renew)()? {
+                self.node.set_membership(membership);
+            }
 
             let due = match self.last_refresh {
                 Some(last) => now.duration_since(last) >= self.config.refresh_interval,

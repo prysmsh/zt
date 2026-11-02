@@ -49,28 +49,28 @@ export const networks: Network[] = [
 
 export const nodes: MeshNode[] = [
   {
-    id: 'web-01', name: 'web-01', address: '10.42.0.18/24', network: 'Production', status: 'online', role: 'Web server', platform: 'Ubuntu 24.04', version: '0.3.1', lastSeen: '4s ago', directPeers: 12, relayedPeers: 0, credentialExpires: '18 days', tags: ['production', 'web'], fingerprint: '7A:4F:92:C1:08:DD', endpoint: '198.51.100.24:9994', publicAddress: '198.51.100.24',
+    id: 'web-01', name: 'web-01', address: '10.42.0.18/24', network: 'Production', status: 'online', role: 'Web server', platform: 'Ubuntu 24.04', version: '0.3.1', lastSeen: '4s ago', directPeers: 12, relayedPeers: 0, credentialIssuedAt: 1700000000, credentialNotAfter: 1701555200, credentialExpires: '18 days', tags: ['production', 'web'], fingerprint: '7A:4F:92:C1:08:DD', endpoint: '198.51.100.24:9994', publicAddress: '198.51.100.24',
   },
   {
-    id: 'db-02', name: 'db-02', address: '10.42.0.42/24', network: 'Production', status: 'online', role: 'Database', platform: 'Debian 12', version: '0.3.1', lastSeen: '7s ago', directPeers: 8, relayedPeers: 2, credentialExpires: '21 days', tags: ['production', 'database'], fingerprint: '91:2B:7E:45:CC:A0', endpoint: '203.0.113.18:9994', publicAddress: '203.0.113.18',
+    id: 'db-02', name: 'db-02', address: '10.42.0.42/24', network: 'Production', status: 'online', role: 'Database', platform: 'Debian 12', version: '0.3.1', lastSeen: '7s ago', directPeers: 8, relayedPeers: 2, credentialIssuedAt: 1700000000, credentialNotAfter: 1701814400, credentialExpires: '21 days', tags: ['production', 'database'], fingerprint: '91:2B:7E:45:CC:A0', endpoint: '203.0.113.18:9994', publicAddress: '203.0.113.18',
   },
   {
-    id: 'bastion-01', name: 'bastion-01', address: '10.42.0.3/24', network: 'Production', status: 'online', role: 'Bastion', platform: 'Alpine 3.21', version: '0.3.1', lastSeen: '2s ago', directPeers: 38, relayedPeers: 0, credentialExpires: '19 days', tags: ['production', 'admin'], fingerprint: '2F:81:16:B7:5A:EE', endpoint: '192.0.2.16:9994', publicAddress: '192.0.2.16',
+    id: 'bastion-01', name: 'bastion-01', address: '10.42.0.3/24', network: 'Production', status: 'online', role: 'Bastion', platform: 'Alpine 3.21', version: '0.3.1', lastSeen: '2s ago', directPeers: 38, relayedPeers: 0, credentialIssuedAt: 1700000000, credentialNotAfter: 1701641600, credentialExpires: '19 days', tags: ['production', 'admin'], fingerprint: '2F:81:16:B7:5A:EE', endpoint: '192.0.2.16:9994', publicAddress: '192.0.2.16',
   },
   {
-    id: 'worker-07', name: 'worker-07', address: '10.43.0.17/24', network: 'Staging', status: 'degraded', role: 'Worker', platform: 'Ubuntu 24.04', version: '0.3.0', lastSeen: '2m ago', directPeers: 4, relayedPeers: 6, credentialExpires: '3 hours', tags: ['staging', 'worker'], fingerprint: 'CB:32:91:0E:77:AF', endpoint: '198.51.100.42:9994', publicAddress: '198.51.100.42',
+    id: 'worker-07', name: 'worker-07', address: '10.43.0.17/24', network: 'Staging', status: 'degraded', role: 'Worker', platform: 'Ubuntu 24.04', version: '0.3.0', lastSeen: '2m ago', directPeers: 4, relayedPeers: 6, credentialIssuedAt: 1700000000, credentialNotAfter: 1700010800, credentialExpires: '3 hours', tags: ['staging', 'worker'], fingerprint: 'CB:32:91:0E:77:AF', endpoint: '198.51.100.42:9994', publicAddress: '198.51.100.42',
   },
   {
-    id: 'laptop-mara', name: 'laptop-mara', address: '10.44.3.81/24', network: 'Development', status: 'online', role: 'Workstation', platform: 'macOS 15.3', version: '0.3.1', lastSeen: '12s ago', directPeers: 2, relayedPeers: 0, credentialExpires: '12 days', tags: ['development', 'macos'], fingerprint: '4D:18:AB:70:CE:39', endpoint: '203.0.113.88:9994', publicAddress: '203.0.113.88',
+    id: 'laptop-mara', name: 'laptop-mara', address: '10.44.3.81/24', network: 'Development', status: 'online', role: 'Workstation', platform: 'macOS 15.3', version: '0.3.1', lastSeen: '12s ago', directPeers: 2, relayedPeers: 0, credentialIssuedAt: 1700000000, credentialNotAfter: 1701036800, credentialExpires: '12 days', tags: ['development', 'macos'], fingerprint: '4D:18:AB:70:CE:39', endpoint: '203.0.113.88:9994', publicAddress: '203.0.113.88',
   },
   {
-    id: 'store-berlin-02', name: 'store-berlin-02', address: '10.45.1.22/20', network: 'Edge sites', status: 'online', role: 'Edge appliance', platform: 'OpenWrt 24.10', version: '0.3.1', lastSeen: '18s ago', directPeers: 3, relayedPeers: 1, credentialExpires: '28 days', tags: ['edge', 'retail'], fingerprint: '68:5C:41:B3:02:DF', endpoint: '192.0.2.64:9994', publicAddress: '192.0.2.64',
+    id: 'store-berlin-02', name: 'store-berlin-02', address: '10.45.1.22/20', network: 'Edge sites', status: 'online', role: 'Edge appliance', platform: 'OpenWrt 24.10', version: '0.3.1', lastSeen: '18s ago', directPeers: 3, relayedPeers: 1, credentialIssuedAt: 1700000000, credentialNotAfter: 1702419200, credentialExpires: '28 days', tags: ['edge', 'retail'], fingerprint: '68:5C:41:B3:02:DF', endpoint: '192.0.2.64:9994', publicAddress: '192.0.2.64',
   },
   {
-    id: 'mobile-17', name: 'mobile-17', address: '10.44.8.17/24', network: 'Development', status: 'offline', role: 'Mobile device', platform: 'Android 15', version: '0.3.0', lastSeen: '2d ago', directPeers: 0, relayedPeers: 0, credentialExpires: 'Expired', tags: ['development', 'android'], fingerprint: 'B2:29:50:E1:BC:67', endpoint: '203.0.113.119:9994', publicAddress: '203.0.113.119',
+    id: 'mobile-17', name: 'mobile-17', address: '10.44.8.17/24', network: 'Development', status: 'offline', role: 'Mobile device', platform: 'Android 15', version: '0.3.0', lastSeen: '2d ago', directPeers: 0, relayedPeers: 0, credentialIssuedAt: 1700000000, credentialNotAfter: 1699913600, credentialExpires: 'Expired', tags: ['development', 'android'], fingerprint: 'B2:29:50:E1:BC:67', endpoint: '203.0.113.119:9994', publicAddress: '203.0.113.119',
   },
   {
-    id: 'api-03', name: 'api-03', address: '10.42.0.33/24', network: 'Production', status: 'online', role: 'API server', platform: 'Ubuntu 24.04', version: '0.3.1', lastSeen: '5s ago', directPeers: 17, relayedPeers: 0, credentialExpires: '24 days', tags: ['production', 'api'], fingerprint: '0F:73:CD:98:4A:21', endpoint: '198.51.100.33:9994', publicAddress: '198.51.100.33',
+    id: 'api-03', name: 'api-03', address: '10.42.0.33/24', network: 'Production', status: 'online', role: 'API server', platform: 'Ubuntu 24.04', version: '0.3.1', lastSeen: '5s ago', directPeers: 17, relayedPeers: 0, credentialIssuedAt: 1700000000, credentialNotAfter: 1702073600, credentialExpires: '24 days', tags: ['production', 'api'], fingerprint: '0F:73:CD:98:4A:21', endpoint: '198.51.100.33:9994', publicAddress: '198.51.100.33',
   },
 ]
 

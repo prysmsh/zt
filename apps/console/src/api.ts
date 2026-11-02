@@ -424,6 +424,8 @@ export function mapNode(node: ControllerNode): MeshNode {
     directPeers: 0,
     relayedPeers: 0,
     credentialExpires: credentialExpiry(node.credential_not_after),
+    credentialIssuedAt: node.credential_issued_at,
+    credentialNotAfter: node.credential_not_after,
     tags: node.tags,
     fingerprint: node.fingerprint,
     // The endpoint the node last reported. It is the address its peers

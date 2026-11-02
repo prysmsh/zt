@@ -93,6 +93,44 @@ but not the traffic runs.
 
 `deploy/zt-agent.service` is that as a systemd unit.
 
+## Renewing the credential
+
+A credential is short-lived. The controller stamps an expiry on it, and a
+node whose credential has expired is refused: it falls off the mesh.
+
+The agent renews on its own, without an operator asking. Both long-running
+modes do it on every tick:
+
+- `checkin` renews before it reports its presence.
+- `run` renews before it refreshes the topology, and puts the new
+  credential into the membership the node presents to its peers.
+
+A renewal replaces the credential, so everything derived from it has to
+follow: the credential the agent presents to the controller, the state on
+disk, and the membership the node hands to a peer. A node that renewed but
+kept the old membership would be offering a credential the controller has
+already replaced, and its peers would refuse it.
+
+### When the renewal comes due
+
+The credential is renewed once **three quarters** of its life has elapsed
+(the fraction is `renew_after_fraction` in the agent's configuration). That
+leaves the last quarter as a margin: a controller that is briefly
+unreachable is retried on the next tick, and the node still has a
+credential that is good for hours rather than minutes.
+
+The age is measured from the credential's **own issue time**, which the
+controller stamped on it. It is not reconstructed from the remaining
+time, because that only works while the lifetime never changes — and it
+is wrong the moment the controller issues a credential with a different
+TTL, which is what an operator does when they shorten a network's TTL to
+test a renewal.
+
+The same fraction is what the console uses to decide whether a credential
+is worth an operator's attention. If the console warned sooner than the
+agent renews, the warning would be on permanently: the agent renews on its
+own schedule, and no operator action can make it renew sooner.
+
 ## Carrying traffic
 
 `zt-agent run` is the data plane. It opens the virtual interface, tells
