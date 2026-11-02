@@ -2,6 +2,7 @@
   "name": "@zt-next/console",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0 OR LicenseRef-Proprietary",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -219,9 +219,24 @@ the remaining work, and the honest trade-offs.
 
 ## Licence
 
-- `crates/zt-crypto`, `crates/zt-testvectors` — **MPL-2.0**
-- Controller, UI, and orchestration — to be licensed separately (see the
-  project plan); these live in separate repositories that link the MPL core.
+Two licences, split along the crate boundary.
+
+| Part | Licence |
+|---|---|
+| `crates/zt-crypto`, `crates/zt-testvectors` | **MPL-2.0** ([LICENSE](LICENSE)) |
+| Everything else — controller, agent, node, TUN, legacy dialects, console | **AGPL-3.0 or commercial** ([LICENSE-CONTROLLER-NOTICE.md](LICENSE-CONTROLLER-NOTICE.md), [LICENSE-CONTROLLER](LICENSE-CONTROLLER)) |
+
+The core is the part meant to be reused: another implementation of the
+protocol, in any language, may build on it under the MPL's file-level
+copyleft, which asks only that changes to the MPL files themselves be
+published.
+
+The controller and the orchestration are the network-facing half, and they
+are dual-licensed the way ZeroTier itself moved: **AGPL-3.0**, or a
+commercial licence. Self-hosting under the AGPL is free and needs no
+negotiation. The commercial licence is for deployments that would rather
+not have the AGPL's copyleft obligation reach the code they expose over a
+network.
 
 ## Status against the plan
 

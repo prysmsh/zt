@@ -23,3 +23,21 @@ Cargo.lock.bak
 
 # Deployment secrets
 deploy/.env
+deploy/.env.*
+!deploy/.env.example
+
+# Anything that looks like a credential, in case a tool writes one here.
+# The test key fixtures under crates/*/tests/data/ are exempt: they are
+# generated test material, and the repository has always carried them.
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+!crates/*/tests/data/*.pem
+!crates/*/tests/data/*.key
+.env
+.env.*
+!.env.example
+secrets/
+credentials/

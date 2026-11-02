@@ -4,7 +4,7 @@ description = "A Linux TUN device for the ZT-next data plane"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "AGPL-3.0 OR LicenseRef-Proprietary"
 
 [dependencies]
 libc = "0.2"

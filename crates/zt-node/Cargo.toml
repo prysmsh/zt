@@ -4,7 +4,7 @@ description = "ZT-next node: UDP transport, peer management, and the end-to-end 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "AGPL-3.0 OR LicenseRef-Proprietary"
 
 [dependencies]
 zt-crypto.workspace = true

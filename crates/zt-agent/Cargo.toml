@@ -3,7 +3,7 @@ name = "zt-agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "AGPL-3.0 OR LicenseRef-Proprietary"
 description = "Node agent for ZT-next: enrollment, credential renewal, and membership"
 
 [dependencies]
