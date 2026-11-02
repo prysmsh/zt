@@ -73,7 +73,12 @@ export function NodeInspector({
         <Detail label="Last seen" value={node.lastSeen} />
         <Detail label="Credential" value={node.credentialExpires} />
         <Detail label="Fingerprint" value={node.fingerprint} mono />
-        <Detail label="Endpoint" value={node.endpoint ?? 'Not reported'} mono />
+        <Detail
+          label="Endpoint"
+          value={reportedEndpoint(node.endpoint)}
+          mono
+          muted={!node.publicAddress}
+        />
         <Detail
           label="Peers"
           value={`${node.directPeers} direct, ${node.relayedPeers} relayed`}
@@ -147,11 +152,35 @@ export function NodeInspector({
 }
 
 /** One row of the details. */
-function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+/**
+ * The endpoint a node reported, or the fact that it has not reported one.
+ *
+ * A node that has never reached a reachable address carries the
+ * unspecified one. It is not an address, so it is not shown as one.
+ */
+function reportedEndpoint(endpoint?: string): string {
+  if (!endpoint || endpoint.startsWith('0.0.0.0:')) return 'Not reported'
+  return endpoint
+}
+
+function Detail({
+  label,
+  value,
+  mono,
+  muted,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  /** The value is a placeholder rather than something real. */
+  muted?: boolean
+}) {
   return (
     <div className="inspector-row">
       <dt>{label}</dt>
-      <dd className={mono ? 'mono' : undefined}>{value}</dd>
+      <dd className={[mono ? 'mono' : undefined, muted ? 'muted' : undefined].filter(Boolean).join(' ') || undefined}>
+        {value}
+      </dd>
     </div>
   )
 }

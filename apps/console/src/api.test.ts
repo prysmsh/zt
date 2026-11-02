@@ -4,6 +4,7 @@ import {
   mapNode,
   mapPolicy,
   mapRelay,
+  publicAddress,
   type ControllerNetwork,
   type ControllerNode,
   type ControllerPolicy,
@@ -25,6 +26,7 @@ const node: ControllerNode = {
   network_id: 'net-1',
   name: 'web-01',
   address: 'aabbccddeeff001122',
+  endpoint: '198.51.100.24:9994',
   public_key: 'aa'.repeat(32),
   fingerprint: '7A:4F:92:C1:08:DD',
   tags: ['web', 'production'],
@@ -93,6 +95,44 @@ describe('mapNode', () => {
       credential_not_after: Math.floor(Date.now() / 1000) + 86_400,
     })
     expect(member.awaitingApproval).toBe(false)
+  })
+
+  it('carries the endpoint the node last reported', () => {
+    const mapped = mapNode({ ...node, endpoint: '198.51.100.24:9994' })
+    expect(mapped.endpoint).toBe('198.51.100.24:9994')
+  })
+
+  it('leaves the endpoint empty when the node has not reported one', () => {
+    const mapped = mapNode({ ...node, endpoint: null })
+    expect(mapped.endpoint).toBeUndefined()
+    expect(mapped.publicAddress).toBeUndefined()
+  })
+})
+
+describe('publicAddress', () => {
+  it('drops the transport port', () => {
+    expect(publicAddress('198.51.100.24:9994')).toBe('198.51.100.24')
+  })
+
+  it('leaves an address without a port alone', () => {
+    expect(publicAddress('198.51.100.24')).toBe('198.51.100.24')
+  })
+
+  it('handles an IPv6 endpoint', () => {
+    expect(publicAddress('[2001:db8::1]:9994')).toBe('[2001:db8::1]')
+  })
+
+  it('has nothing to say about a missing endpoint', () => {
+    expect(publicAddress(undefined)).toBeUndefined()
+    expect(publicAddress(null)).toBeUndefined()
+    expect(publicAddress('')).toBeUndefined()
+  })
+
+  it('does not present the unspecified address as a route', () => {
+    // A node that has never reported a reachable address carries the
+    // unspecified one. It is not somewhere an operator can send traffic.
+    expect(publicAddress('0.0.0.0:9994')).toBeUndefined()
+    expect(publicAddress('0.0.0.0')).toBeUndefined()
   })
 })
 

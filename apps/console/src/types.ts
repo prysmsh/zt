@@ -31,7 +31,10 @@ export interface MeshNode {
   credentialExpires: string
   tags: string[]
   fingerprint: string
+  /** The UDP endpoint the node last reported, as `ip:port`. */
   endpoint?: string
+  /** The endpoint's address without its port: the node's public side. */
+  publicAddress?: string
   /** A join request waiting for the operator's decision. */
   awaitingApproval?: boolean
 }

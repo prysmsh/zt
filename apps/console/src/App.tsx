@@ -244,6 +244,7 @@ function NetworkRow({
 
 function NodeTable({
   items,
+  networks,
   onOpen,
   onApprove,
   onReject,
@@ -253,6 +254,8 @@ function NodeTable({
   onClearChecked,
 }: {
   items: MeshNode[]
+  /** The networks, so a node can name the one it is in. */
+  networks?: Network[]
   onOpen?: (node: MeshNode) => void
   /** Approve a pending node. Omitted where approval makes no sense. */
   onApprove?: (node: MeshNode) => void
@@ -286,16 +289,17 @@ function NodeTable({
                   type="checkbox"
                   checked={items.length > 0 && !!checked && items.every((node) => checked.has(node.id))}
                   onChange={() => (onToggleAll ? onToggleAll() : onClearChecked?.())}
-                  aria-label={onToggleAll ? 'Select all visible nodes' : 'Clear selection'}
+                  aria-label="Select all visible nodes"
                 />
               </th>
             ) : null}
-            <th>Node</th>
-            <th>Network</th>
+            <th>Device ID</th>
+            <th>Name</th>
             <th>Status</th>
-            <th>Last seen</th>
-            <th>Credential</th>
-            <th>Platform</th>
+            <th>ZT IP</th>
+            <th>Public IP</th>
+            <th>Version</th>
+            <th>Last Active</th>
             {onApprove || onReject ? <th aria-label="Actions" /> : null}
           </tr>
         </thead>
@@ -321,6 +325,9 @@ function NodeTable({
                   </td>
                 ) : null}
                 <td>
+                  <div className="cell-handle">{deviceId(node)}</div>
+                </td>
+                <td>
                   <div className="cell-main">
                     {onOpen ? (
                       <button type="button" className="cell-link" onClick={() => onOpen(node)}>
@@ -330,15 +337,28 @@ function NodeTable({
                       node.name
                     )}
                   </div>
-                  <div className="cell-sub">{node.address}</div>
+                  <div className="cell-sub">
+                    {networkName(networks, node.network) ?? node.network}
+                  </div>
                 </td>
-                <td>{node.network}</td>
                 <td>
                   <StatusPill status={node.status} />
                 </td>
+                <td>
+                  <div className="cell-address">{node.address}</div>
+                </td>
+                <td>
+                  {node.publicAddress ? (
+                    <div className="cell-address">{node.publicAddress}</div>
+                  ) : (
+                    <div className="cell-address-missing">—</div>
+                  )}
+                </td>
+                <td>
+                  <div className="cell-main">{node.version}</div>
+                  <div className="cell-sub">{node.platform}</div>
+                </td>
                 <td>{node.lastSeen}</td>
-                <td>{node.credentialExpires}</td>
-                <td>{node.platform}</td>
                 {onApprove || onReject ? (
                   <td>
                     {node.awaitingApproval ? (
@@ -378,6 +398,24 @@ function NodeTable({
       </table>
     </div>
   )
+}
+
+/**
+ * The handle a device is known by in a list.
+ *
+ * ZeroTier calls this the device ID: a short hex string that identifies
+ * the device without naming it. The node's own identifier is a UUID,
+ * which says nothing at a glance, so the handle is the node's
+ * fingerprint instead: twelve hex characters, stable for the life of
+ * the device, and already what an operator reads off the node itself.
+ */
+function deviceId(node: MeshNode): string {
+  return node.fingerprint.replace(/:/g, '').toLowerCase()
+}
+
+/** The name of the network a node is in, when it can be found. */
+function networkName(networks: Network[] | undefined, id: string): string | undefined {
+  return networks?.find((network) => network.id === id)?.name
 }
 
 /** A filter chip that opens a menu of options. */
@@ -614,7 +652,7 @@ function Overview({
         {data.nodes.length === 0 ? (
           <EmptyView title="No nodes enrolled" detail="Enroll the first node to start building the mesh." />
         ) : (
-          <NodeTable items={data.nodes.slice(0, 5)} />
+          <NodeTable items={data.nodes.slice(0, 5)} networks={data.networks} />
         )}
       </section>
     </>
@@ -925,6 +963,7 @@ function NodesPage({
         ) : (
           <NodeTable
             items={filtered}
+            networks={networks}
             onOpen={setSelected}
             onApprove={handleApprove}
             onReject={handleReject}

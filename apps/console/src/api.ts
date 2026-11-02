@@ -28,6 +28,8 @@ export interface ControllerNode {
   network_id: string
   name: string
   address: string
+  /** The UDP endpoint the node last reported, as `ip:port`. */
+  endpoint?: string | null
   public_key: string
   fingerprint: string
   tags: string[]
@@ -424,12 +426,33 @@ export function mapNode(node: ControllerNode): MeshNode {
     credentialExpires: credentialExpiry(node.credential_not_after),
     tags: node.tags,
     fingerprint: node.fingerprint,
-    endpoint: undefined,
+    // The endpoint the node last reported. It is the address its peers
+    // send to, so it is the node's public side: the port is the transport
+    // port, and the address in front of it is what a person would look up.
+    endpoint: node.endpoint ?? undefined,
+    publicAddress: publicAddress(node.endpoint),
     // A pending status means one of two things: a join request nobody
     // approved yet, or a member holding a credential that has not
     // checked in. Only the first is a decision awaiting the operator.
     awaitingApproval: node.credential_issued_at === 0 && node.status === 'pending',
   }
+}
+
+/**
+ * The public address of a node's endpoint, without the transport port.
+ *
+ * The controller records the endpoint as `ip:port`, because that is what
+ * a peer dials. An operator looking at a list wants the address itself.
+ *
+ * A node that has never reported a reachable address carries the
+ * unspecified one, which is not an address anyone can use, so it reads as
+ * unknown rather than as a route to nowhere.
+ */
+export function publicAddress(endpoint?: string | null): string | undefined {
+  if (!endpoint) return undefined
+  const address = endpoint.replace(/:\d+$/, '')
+  if (!address || address === '0.0.0.0' || address === '::') return undefined
+  return address
 }
 
 /** Render a credential expiry as an absolute state or a relative countdown. */
