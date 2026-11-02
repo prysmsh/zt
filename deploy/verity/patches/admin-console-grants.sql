@@ -26,7 +26,24 @@ WHERE res.tenant_id = 'admin'
   AND res.indicator IN ('https://admin.prysm.sh/api', 'https://admin.prysm.sh/me')
 ON CONFLICT DO NOTHING;
 
+-- The admin tenant's own machine, the one that calls the Management API
+-- for the admin tenant, needs the scopes its role names. Without them it
+-- authenticates and is then forbidden from every route: the machine's
+-- role is bound, but no scope is attached to it.
+INSERT INTO roles_scopes (tenant_id, id, role_id, scope_id)
+VALUES ('admin', 'rs-mapi-admin', 'm-admin', 'scope-admin-mapi-all')
+ON CONFLICT DO NOTHING;
+
+-- The same machine, for the Cloud API at the admin origin. This is the
+-- API the console lists the tenants through.
+INSERT INTO roles_scopes (tenant_id, id, role_id, scope_id)
+VALUES ('admin', 'rs-mapi-admin-cloud', 'm-admin', 'sc-prysm-admin-api')
+ON CONFLICT DO NOTHING;
+
 COMMIT;
 
 -- What the console can now ask for.
 SELECT application_id, scope_id FROM application_user_consent_resource_scopes WHERE application_id = 'admin-console';
+
+-- What the admin tenant's machine can now ask for.
+SELECT role_id, scope_id FROM roles_scopes WHERE role_id = 'm-admin';
